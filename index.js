@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const token = process.env.DISCORD_TOKEN;
 const port = process.env.PORT || 3000;
-const clientId = process.env.CLIENT_ID; // Add your Bot Application ID to Railway Variables
+const clientId = process.env.CLIENT_ID; // Bot Application ID from Railway Variables
 
 if (!token || !clientId) {
   console.error('[ERROR] DISCORD_TOKEN or CLIENT_ID missing');
@@ -31,17 +31,34 @@ const client = new Client({
 
 client.commands = new Collection();
 const PREFIX = '!';
+const ALLOWED_USER_ID = '1343244701507260416'; 
 
-// 🔥 PREFIX COMMAND: !protest 🔥
-client.on(Events.MessageCreate, message => {
+// 🔥 !message COMMAND - Copies message with ALL formatting 🔥
+client.on(Events.MessageCreate, async message => {
   if (message.author.bot || !message.content.startsWith(PREFIX)) return;
   
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const commandName = args.shift().toLowerCase();
   
-  if (commandName === 'protest') {
-    console.log(`[!CMD] protest by ${message.author.tag}`);
-    return message.reply('🪧 **Protest mode activated!** Test passed! ✅');
+  // !message - only for specific user
+  if (commandName === 'message' && message.author.id === ALLOWED_USER_ID) {
+    console.log(`[!MSG] message by ${message.author.tag}`);
+    
+    try {
+      // Delete original !message
+      await message.delete();
+      
+      // Send copied message with PERFECT formatting + mentions
+      await message.channel.send({
+        content: args.join(' '),
+        allowedMentions: { parse: ['users', 'roles'] }
+      });
+      
+      console.log(`✅ !message copied by ${message.author.tag}`);
+    } catch (error) {
+      console.error('❌ !message failed:', error);
+    }
+    return;
   }
 });
 
@@ -73,7 +90,7 @@ async function loadAndDeployCommands() {
     }
   }
   
-  // AUTO-DEPLOY SLASH COMMANDS
+  // Auto-deploy slash commands
   const rest = new REST({ version: '10' }).setToken(token);
   try {
     await rest.put(Routes.applicationCommands(clientId), { body: slashCommands });
@@ -88,7 +105,7 @@ loadAndDeployCommands();
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ ProFlare Bot online as ${client.user.tag}!`);
-  console.log(`📊 ${client.commands.size} slash + !protest`);
+  console.log(`📊 Slash commands: ${client.commands.size} | !message ready`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
