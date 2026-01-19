@@ -14,14 +14,15 @@ module.exports = [
       .setName('autorocket')
       .setDescription('AutoRocket+'),
     async execute(interaction) {
-      await interaction.reply('🚀 **AutoRocket+**: https://placehold.co.');
+      await interaction.reply('🚀 **AutoRocket+**: https://placehold.co');
     }
   },
   {
     data: new SlashCommandBuilder()
       .setName('performance-eternal')
       .setDescription('Performance Eternal'),
-    async execute(interaction).reply('Will do this later');
+    async execute(interaction) {
+      await interaction.reply('⚡ **Performance Eternal**: Coming soon!');
     }
   }
 ];
