@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, Partials, Events } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Partials, Events, SlashCommandBuilder } = require('discord.js');
 const express = require('express');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,7 +12,7 @@ if (!token) {
   process.exit(1);
 }
 
-// Express for Railway health check
+// Express for Railway
 const app = express();
 app.use(express.json());
 app.get('/health', (req, res) => res.sendStatus(200));
@@ -26,43 +26,58 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// 🔥 LOADS BOTH SINGLE FILES AND all.js ARRAY 🔥
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+// 🔥 BUILT-IN TEST COMMAND: /protest 🔥
+client.commands.set('protest', {
+  data: new SlashCommandBuilder()
+    .setName('protest')
+    .setDescription('🪧 Test command for ProFlare Studios'),
+  async execute(interaction) {
+    await interaction.reply('🪧 **Protest mode activated!** This is a test command working perfectly on Railway! ✅');
+  }
+});
 
-for (const file of commandFiles) {
-  const filePath = path.join(commandsPath, file);
-  const loaded = require(filePath);
-  
-  // Handle all.js ARRAY
-  if (Array.isArray(loaded)) {
-    loaded.forEach(command => {
-      if ('data' in command && 'execute' in command) {
-        client.commands.set(command.data.name, command);
-        console.log(`✅ Loaded array command: ${command.data.name}`);
-      }
-    });
-  } 
-  // Handle single command files (autototem.js, etc.)
-  else if ('data' in loaded && 'execute' in loaded) {
-    client.commands.set(loaded.data.name, loaded);
-    console.log(`✅ Loaded: ${loaded.data.name}`);
-  } 
-  else {
-    console.log(`[WARNING] Invalid: ${file}`);
+// 🔥 LOAD ALL COMMANDS FROM /commands FOLDER (handles both single files AND all.js array) 🔥
+const commandsPath = path.join(__dirname, 'commands');
+if (fs.existsSync(commandsPath)) {
+  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+  for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const loaded = require(filePath);
+    
+    // Handle all.js ARRAY
+    if (Array.isArray(loaded)) {
+      loaded.forEach(command => {
+        if ('data' in command && 'execute' in command) {
+          client.commands.set(command.data.name, command);
+          console.log(`✅ Loaded array command: ${command.data.name}`);
+        }
+      });
+    } 
+    // Handle single command files
+    else if ('data' in loaded && 'execute' in loaded) {
+      client.commands.set(loaded.data.name, loaded);
+      console.log(`✅ Loaded: ${loaded.data.name}`);
+    } 
+    else {
+      console.log(`[WARNING] Invalid: ${file}`);
+    }
   }
 }
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ ProFlare Bot online as ${client.user.tag}!`);
-  console.log(`📊 Loaded ${client.commands.size} commands`);
+  console.log(`📊 Total commands: ${client.commands.size} (including /protest)`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
   
   const command = client.commands.get(interaction.commandName);
-  if (!command) return;
+  if (!command) {
+    console.log(`❌ No command: ${interaction.commandName}`);
+    return;
+  }
 
   try {
     console.log(`[CMD] ${interaction.commandName} by ${interaction.user.tag}`);
