@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const token = process.env.DISCORD_TOKEN;
 const port = process.env.PORT || 3000;
-const clientId = process.env.CLIENT_ID; // Bot Application ID from Railway Variables
+const clientId = process.env.CLIENT_ID;
 
 if (!token || !clientId) {
   console.error('[ERROR] DISCORD_TOKEN or CLIENT_ID missing');
@@ -31,30 +31,38 @@ const client = new Client({
 
 client.commands = new Collection();
 const PREFIX = '!';
-const ALLOWED_USER_ID = '1343244701507260416'; 
+const ALLOWED_USER_ID = '1343244701507260416'; // YOUR ID ✅
 
-// 🔥 !message COMMAND - Copies message with ALL formatting 🔥
+// 🔥 !message COMMAND - Copies with ALL formatting 🔥
 client.on(Events.MessageCreate, async message => {
-  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+  if (message.author.bot) return;
+  
+  // DEBUG all ! commands
+  if (message.content.startsWith(PREFIX)) {
+    console.log(`[DEBUG] ${message.author.tag} (${message.author.id}): "${message.content}"`);
+  }
+  
+  if (!message.content.startsWith(PREFIX)) return;
   
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const commandName = args.shift().toLowerCase();
   
-  // !message - only for specific user
+  console.log(`[CMD] "${commandName}" | Args: "${args.join(' ')}"`);
+  
+  // !message - ONLY YOU can use it
   if (commandName === 'message' && message.author.id === ALLOWED_USER_ID) {
-    console.log(`[!MSG] message by ${message.author.tag}`);
+    console.log(`[!MSG] TRIGGERED by ${message.author.tag}`);
     
     try {
-      // Delete original !message
       await message.delete();
+      const contentToCopy = args.join(' ');
       
-      // Send copied message with PERFECT formatting + mentions
       await message.channel.send({
-        content: args.join(' '),
+        content: contentToCopy,
         allowedMentions: { parse: ['users', 'roles'] }
       });
       
-      console.log(`✅ !message copied by ${message.author.tag}`);
+      console.log(`✅ Copied: "${contentToCopy}"`);
     } catch (error) {
       console.error('❌ !message failed:', error);
     }
@@ -62,7 +70,7 @@ client.on(Events.MessageCreate, async message => {
   }
 });
 
-// 🔥 LOAD + AUTO-DEPLOY SLASH COMMANDS 🔥
+// 🔥 AUTO-LOAD + DEPLOY SLASH COMMANDS 🔥
 async function loadAndDeployCommands() {
   const commandsPath = path.join(__dirname, 'commands');
   const slashCommands = [];
@@ -79,46 +87,39 @@ async function loadAndDeployCommands() {
           if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
             slashCommands.push(command.data.toJSON());
-            console.log(`✅ Loaded slash: ${command.data.name}`);
           }
         });
       } else if ('data' in loaded && 'execute' in loaded) {
         client.commands.set(loaded.data.name, loaded);
         slashCommands.push(loaded.data.toJSON());
-        console.log(`✅ Loaded slash: ${loaded.data.name}`);
       }
     }
   }
   
-  // Auto-deploy slash commands
   const rest = new REST({ version: '10' }).setToken(token);
   try {
     await rest.put(Routes.applicationCommands(clientId), { body: slashCommands });
-    console.log(`🔥 Auto-deployed ${slashCommands.length} slash commands!`);
+    console.log(`🔥 Deployed ${slashCommands.length} slash commands!`);
   } catch (error) {
-    console.error('❌ Auto-deploy failed:', error);
+    console.error('Deploy error:', error);
   }
 }
 
-// Load commands on startup
 loadAndDeployCommands();
 
 client.once(Events.ClientReady, () => {
-  console.log(`✅ ProFlare Bot online as ${client.user.tag}!`);
-  console.log(`📊 Slash commands: ${client.commands.size} | !message ready`);
+  console.log(`✅ ProFlare Bot online!`);
+  console.log(`📊 Slash: ${client.commands.size} | !message: YOU (${ALLOWED_USER_ID})`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
-  
   const command = client.commands.get(interaction.commandName);
   if (!command) return;
 
   try {
-    console.log(`[/CMD] ${interaction.commandName}`);
     await command.execute(interaction);
   } catch (error) {
-    console.error(error);
     if (!interaction.replied) {
       await interaction.reply({ content: '❌ Error!', ephemeral: true });
     }
