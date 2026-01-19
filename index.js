@@ -13,13 +13,11 @@ if (!token || !clientId) {
   process.exit(1);
 }
 
-// Express for Railway
 const app = express();
 app.use(express.json());
 app.get('/health', (req, res) => res.sendStatus(200));
 app.listen(port, '0.0.0.0', () => console.log(`[INFO] Web on port ${port}`));
 
-// Discord Client
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -31,31 +29,23 @@ const client = new Client({
 
 client.commands = new Collection();
 const PREFIX = '!';
-const ALLOWED_USER_ID = '1343244701507260416'; // YOUR ID ✅
+const ALLOWED_USER_ID = '1343244701507260416';
 
-// 🔥 !message COMMAND - Copies with ALL formatting 🔥
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
   
-  // DEBUG all ! commands
-  if (message.content.startsWith(PREFIX)) {
-    console.log(`[DEBUG] ${message.author.tag} (${message.author.id}): "${message.content}"`);
-  }
-  
   if (!message.content.startsWith(PREFIX)) return;
   
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const fullContent = message.content.slice(PREFIX.length).trim();
+  const args = fullContent.split(/ +/);
   const commandName = args.shift().toLowerCase();
   
-  console.log(`[CMD] "${commandName}" | Args: "${args.join(' ')}"`);
-  
-  // !message - ONLY YOU can use it
   if (commandName === 'message' && message.author.id === ALLOWED_USER_ID) {
-    console.log(`[!MSG] TRIGGERED by ${message.author.tag}`);
+    console.log(`[!MSG] ${message.author.tag}`);
     
     try {
       await message.delete();
-      const contentToCopy = args.join(' ');
+      const contentToCopy = fullContent.slice('message'.length).trim();
       
       await message.channel.send({
         content: contentToCopy,
@@ -64,13 +54,12 @@ client.on(Events.MessageCreate, async message => {
       
       console.log(`✅ Copied: "${contentToCopy}"`);
     } catch (error) {
-      console.error('❌ !message failed:', error);
+      console.error('❌ Failed:', error);
     }
     return;
   }
 });
 
-// 🔥 AUTO-LOAD + DEPLOY SLASH COMMANDS 🔥
 async function loadAndDeployCommands() {
   const commandsPath = path.join(__dirname, 'commands');
   const slashCommands = [];
@@ -109,7 +98,7 @@ loadAndDeployCommands();
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ ProFlare Bot online!`);
-  console.log(`📊 Slash: ${client.commands.size} | !message: YOU (${ALLOWED_USER_ID})`);
+  console.log(`📊 Slash: ${client.commands.size} | !message ready`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
