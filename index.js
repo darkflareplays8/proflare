@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, Partials, Events, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Partials, Events } = require('discord.js');
 const express = require('express');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,23 +20,31 @@ app.listen(port, '0.0.0.0', () => console.log(`[INFO] Web on port ${port}`));
 
 // Discord Client
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
-  partials: [Partials.Channel]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ],
+  partials: [Partials.Channel, Partials.Message]
 });
 
 client.commands = new Collection();
+const PREFIX = '!';
 
-// 🔥 BUILT-IN TEST COMMAND: /protest 🔥
-client.commands.set('protest', {
-  data: new SlashCommandBuilder()
-    .setName('protest')
-    .setDescription('🪧 Test command for ProFlare Studios'),
-  async execute(interaction) {
-    await interaction.reply('🪧 **Protest mode activated!** This is a test command working perfectly on Railway! ✅');
+// 🔥 BUILT-IN PREFIX COMMAND: !protest 🔥
+client.on(Events.MessageCreate, message => {
+  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+  
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const commandName = args.shift().toLowerCase();
+  
+  if (commandName === 'protest') {
+    console.log(`[!CMD] protest by ${message.author.tag}`);
+    return message.reply('🪧 **Protest mode activated!** This is a test command working perfectly on Railway! ✅');
   }
 });
 
-// 🔥 LOAD ALL COMMANDS FROM /commands FOLDER (handles both single files AND all.js array) 🔥
+// 🔥 LOAD ALL SLASH COMMANDS FROM /commands FOLDER 🔥
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
   const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -45,21 +53,17 @@ if (fs.existsSync(commandsPath)) {
     const filePath = path.join(commandsPath, file);
     const loaded = require(filePath);
     
-    // Handle all.js ARRAY
     if (Array.isArray(loaded)) {
       loaded.forEach(command => {
         if ('data' in command && 'execute' in command) {
           client.commands.set(command.data.name, command);
-          console.log(`✅ Loaded array command: ${command.data.name}`);
+          console.log(`✅ Loaded slash: ${command.data.name}`);
         }
       });
-    } 
-    // Handle single command files
-    else if ('data' in loaded && 'execute' in loaded) {
+    } else if ('data' in loaded && 'execute' in loaded) {
       client.commands.set(loaded.data.name, loaded);
-      console.log(`✅ Loaded: ${loaded.data.name}`);
-    } 
-    else {
+      console.log(`✅ Loaded slash: ${loaded.data.name}`);
+    } else {
       console.log(`[WARNING] Invalid: ${file}`);
     }
   }
@@ -67,25 +71,22 @@ if (fs.existsSync(commandsPath)) {
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ ProFlare Bot online as ${client.user.tag}!`);
-  console.log(`📊 Total commands: ${client.commands.size} (including /protest)`);
+  console.log(`📊 Slash commands: ${client.commands.size} | Prefix: !protest`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
   
   const command = client.commands.get(interaction.commandName);
-  if (!command) {
-    console.log(`❌ No command: ${interaction.commandName}`);
-    return;
-  }
+  if (!command) return;
 
   try {
-    console.log(`[CMD] ${interaction.commandName} by ${interaction.user.tag}`);
+    console.log(`[/CMD] ${interaction.commandName} by ${interaction.user.tag}`);
     await command.execute(interaction);
   } catch (error) {
     console.error(error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Command failed!', ephemeral: true });
+    if (!interaction.replied) {
+      await interaction.reply({ content: '❌ Error!', ephemeral: true });
     }
   }
 });
