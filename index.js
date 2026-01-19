@@ -1,14 +1,15 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, Partials, Events } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Partials, Events, REST, Routes } = require('discord.js');
 const express = require('express');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const token = process.env.DISCORD_TOKEN;
 const port = process.env.PORT || 3000;
+const clientId = process.env.CLIENT_ID; // Add your Bot Application ID to Railway Variables
 
-if (!token) {
-  console.error('[ERROR] DISCORD_TOKEN missing');
+if (!token || !clientId) {
+  console.error('[ERROR] DISCORD_TOKEN or CLIENT_ID missing');
   process.exit(1);
 }
 
@@ -31,7 +32,7 @@ const client = new Client({
 client.commands = new Collection();
 const PREFIX = '!';
 
-// 🔥 BUILT-IN PREFIX COMMAND: !protest 🔥
+// 🔥 PREFIX COMMAND: !protest 🔥
 client.on(Events.MessageCreate, message => {
   if (message.author.bot || !message.content.startsWith(PREFIX)) return;
   
@@ -40,38 +41,54 @@ client.on(Events.MessageCreate, message => {
   
   if (commandName === 'protest') {
     console.log(`[!CMD] protest by ${message.author.tag}`);
-    return message.reply('🪧 **Protest mode activated!** This is a test command working perfectly on Railway! ✅');
+    return message.reply('🪧 **Protest mode activated!** Test passed! ✅');
   }
 });
 
-// 🔥 LOAD ALL SLASH COMMANDS FROM /commands FOLDER 🔥
-const commandsPath = path.join(__dirname, 'commands');
-if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const loaded = require(filePath);
+// 🔥 LOAD + AUTO-DEPLOY SLASH COMMANDS 🔥
+async function loadAndDeployCommands() {
+  const commandsPath = path.join(__dirname, 'commands');
+  const slashCommands = [];
+  
+  if (fs.existsSync(commandsPath)) {
+    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
     
-    if (Array.isArray(loaded)) {
-      loaded.forEach(command => {
-        if ('data' in command && 'execute' in command) {
-          client.commands.set(command.data.name, command);
-          console.log(`✅ Loaded slash: ${command.data.name}`);
-        }
-      });
-    } else if ('data' in loaded && 'execute' in loaded) {
-      client.commands.set(loaded.data.name, loaded);
-      console.log(`✅ Loaded slash: ${loaded.data.name}`);
-    } else {
-      console.log(`[WARNING] Invalid: ${file}`);
+    for (const file of commandFiles) {
+      const filePath = path.join(commandsPath, file);
+      const loaded = require(filePath);
+      
+      if (Array.isArray(loaded)) {
+        loaded.forEach(command => {
+          if ('data' in command && 'execute' in command) {
+            client.commands.set(command.data.name, command);
+            slashCommands.push(command.data.toJSON());
+            console.log(`✅ Loaded slash: ${command.data.name}`);
+          }
+        });
+      } else if ('data' in loaded && 'execute' in loaded) {
+        client.commands.set(loaded.data.name, loaded);
+        slashCommands.push(loaded.data.toJSON());
+        console.log(`✅ Loaded slash: ${loaded.data.name}`);
+      }
     }
+  }
+  
+  // AUTO-DEPLOY SLASH COMMANDS
+  const rest = new REST({ version: '10' }).setToken(token);
+  try {
+    await rest.put(Routes.applicationCommands(clientId), { body: slashCommands });
+    console.log(`🔥 Auto-deployed ${slashCommands.length} slash commands!`);
+  } catch (error) {
+    console.error('❌ Auto-deploy failed:', error);
   }
 }
 
+// Load commands on startup
+loadAndDeployCommands();
+
 client.once(Events.ClientReady, () => {
   console.log(`✅ ProFlare Bot online as ${client.user.tag}!`);
-  console.log(`📊 Slash commands: ${client.commands.size} | Prefix: !protest`);
+  console.log(`📊 ${client.commands.size} slash + !protest`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -81,7 +98,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (!command) return;
 
   try {
-    console.log(`[/CMD] ${interaction.commandName} by ${interaction.user.tag}`);
+    console.log(`[/CMD] ${interaction.commandName}`);
     await command.execute(interaction);
   } catch (error) {
     console.error(error);
