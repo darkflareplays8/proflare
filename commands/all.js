@@ -6,7 +6,7 @@ module.exports = [
       .setName('autototem')
       .setDescription('AutoTotem+'),
     async execute(interaction) {
-      await interaction.reply('🔥 **AutoTotem+**: https://placehold.com');
+      await interaction.reply('🔥 **AutoTotem+**: https://modrinth.com/mod/autototem+');
     }
   },
   {
@@ -14,7 +14,7 @@ module.exports = [
       .setName('autorocket')
       .setDescription('AutoRocket+'),
     async execute(interaction) {
-      await interaction.reply('🚀 **AutoRocket+**: https://placehold.co');
+      await interaction.reply('🚀 **AutoRocket+**: https://modrinth.com/mod/autorocket+');
     }
   },
   {
@@ -22,7 +22,7 @@ module.exports = [
       .setName('performance-eternal')
       .setDescription('Performance Eternal'),
     async execute(interaction) {
-      await interaction.reply('⚡ **Performance Eternal**: Coming soon!');
+      await interaction.reply('⚡ **Performance Eternal**: https://modrinth.com/modpack/performance-eternal');
     }
   }
 ];
