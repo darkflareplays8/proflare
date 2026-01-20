@@ -47,14 +47,16 @@ client.on(Events.MessageCreate, async message => {
       await message.delete();
       const contentToCopy = fullContent.slice('message'.length).trim();
       
-      await message.channel.send({
+      const webhook = await message.channel.createWebhook({ name: 'ProFlare' });
+      await webhook.send({
         content: contentToCopy,
-        allowedMentions: { parse: ['users', 'roles'] }
+        allowedMentions: { parse: ['users', 'roles', 'everyone'] }
       });
+      await webhook.delete();
       
-      console.log(`✅ Copied: "${contentToCopy}"`);
+      console.log(`✅ Webhook copied: "${contentToCopy}"`);
     } catch (error) {
-      console.error('❌ Failed:', error);
+      console.error('❌ Webhook failed:', error);
     }
     return;
   }
@@ -98,7 +100,7 @@ loadAndDeployCommands();
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ ProFlare Bot online!`);
-  console.log(`📊 Slash: ${client.commands.size} | !message ready`);
+  console.log(`📊 Slash: ${client.commands.size} | !message (webhook) ready`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
