@@ -1,4 +1,4 @@
-require('dotenv').config(); // <-- must be first
+require('dotenv').config(); // must be first
 
 const {
   Client,
@@ -34,6 +34,11 @@ const JOIN_GUILD_ID = '1455924604085473361';
 const JOIN_CHANNEL_ID = '1455930364810756169';
 const BOOST_CHANNEL_ID = '1455935047554040037';
 const SUGGEST_CATEGORY_ID = '1455955288346595348';
+
+// --- VERIFICATION CONFIG ---
+const VERIFY_CHANNEL_ID = '1455929265538465844';
+const VERIFY_ROLE_ID = '1455929546808234085';
+const VERIFY_LOG_CHANNEL_ID = '1455933721483149492';
 
 const JOIN_MESSAGES = [
   member => `Welcome ${member} to **${member.guild.name}**!`,
@@ -151,6 +156,26 @@ client.on(Events.MessageCreate, async message => {
     await message.channel.send({ embeds: [embed], components: [row] });
   }
 
+  // !panel verify
+  if (commandName === 'panel' && args[0] === 'verify' && message.author.id === ALLOWED_USER_ID) {
+    const channel = message.guild.channels.cache.get(VERIFY_CHANNEL_ID);
+    if (!channel) return message.reply('Verification channel not found.');
+
+    const embed = new EmbedBuilder()
+      .setTitle('✅ Verification')
+      .setDescription('Click the button below to verify and get access!')
+      .setColor(randomColor());
+
+    const button = new ButtonBuilder()
+      .setCustomId('verify_button')
+      .setLabel('Verify')
+      .setStyle(ButtonStyle.Success);
+
+    const row = new ActionRowBuilder().addComponents(button);
+
+    await channel.send({ embeds: [embed], components: [row] });
+  }
+
   // !close command
   if (commandName === 'close') {
     if (message.channel.name.startsWith('suggest-') || BUG_TYPES.some(t => message.channel.name.startsWith(t.id))) {
@@ -186,9 +211,11 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
 
 // --- INTERACTIONS ---
 client.on(Events.InteractionCreate, async interaction => {
-  // BUTTONS
+
+  // --- BUTTONS ---
   if (interaction.isButton()) {
-    // Suggestion ticket button
+
+    // Suggestion ticket
     if (interaction.customId === 'suggest_create') {
       const modal = new ModalBuilder()
         .setCustomId('suggest_modal')
@@ -236,9 +263,32 @@ client.on(Events.InteractionCreate, async interaction => {
 
       await interaction.showModal(modal);
     }
+
+    // Verification button
+    if (interaction.customId === 'verify_button') {
+      const member = interaction.member;
+      const role = interaction.guild.roles.cache.get(VERIFY_ROLE_ID);
+      const logChannel = interaction.guild.channels.cache.get(VERIFY_LOG_CHANNEL_ID);
+
+      if (!role) return interaction.reply({ content: 'Role not found.', ephemeral: true });
+      if (!logChannel) return interaction.reply({ content: 'Log channel not found.', ephemeral: true });
+
+      if (member.roles.cache.has(role.id)) {
+        return interaction.reply({ content: 'You are already verified!', ephemeral: true });
+      }
+
+      try {
+        await member.roles.add(role);
+        await interaction.reply({ content: '✅ You are now verified!', ephemeral: true });
+        await logChannel.send(`✅ ${member.user.tag} has verified!`);
+      } catch (err) {
+        console.error(err);
+        await interaction.reply({ content: '❌ Failed to give role.', ephemeral: true });
+      }
+    }
   }
 
-  // MODAL SUBMIT
+  // --- MODAL SUBMIT ---
   if (interaction.type === InteractionType.ModalSubmit) {
     const guild = interaction.guild;
     const category = guild.channels.cache.get(SUGGEST_CATEGORY_ID);
