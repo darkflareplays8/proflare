@@ -24,7 +24,15 @@ if (!token || !clientId) {
 const PREFIX = '!';
 const ALLOWED_USER_ID = '1343244701507260416';
 const JOIN_GUILD_ID = '1455924604085473361';
-const JOIN_CHANNEL_ID = 'YOUR_CHANNEL_ID_HERE';
+const JOIN_CHANNEL_ID = '1455930364810756169';
+
+const JOIN_MESSAGES = [
+  member => `👋 Welcome ${member} to **${member.guild.name}**!`,
+  member => `🔥 ${member.user.username} just joined — say hi!`,
+  member => `🎉 Everyone welcome ${member}!`,
+  member => `💫 ${member} has entered the server`,
+  member => `🚀 ${member.user.username} joined the party`
+];
 
 const app = express();
 app.use(express.json());
@@ -70,8 +78,11 @@ client.on(Events.GuildMemberAdd, async member => {
   const channel = member.guild.channels.cache.get(JOIN_CHANNEL_ID);
   if (!channel) return;
 
+  const message =
+    JOIN_MESSAGES[Math.floor(Math.random() * JOIN_MESSAGES.length)](member);
+
   try {
-    await channel.send(`👋 Welcome ${member} to **${member.guild.name}**!`);
+    await channel.send(message);
   } catch (error) {
     console.error('❌ Join message failed:', error);
   }
@@ -102,20 +113,13 @@ async function loadAndDeployCommands() {
   }
 
   const rest = new REST({ version: '10' }).setToken(token);
-
-  try {
-    await rest.put(Routes.applicationCommands(clientId), {
-      body: slashCommands
-    });
-  } catch (error) {
-    console.error('Deploy error:', error);
-  }
+  await rest.put(Routes.applicationCommands(clientId), { body: slashCommands });
 }
 
 loadAndDeployCommands();
 
 client.once(Events.ClientReady, () => {
-  console.log(`✅ ProFlare Bot online`);
+  console.log('✅ ProFlare Bot online');
 });
 
 client.on(Events.InteractionCreate, async interaction => {
