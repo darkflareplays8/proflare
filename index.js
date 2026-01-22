@@ -7,7 +7,14 @@ const {
   Events,
   REST,
   Routes,
-  EmbedBuilder
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  InteractionType
 } = require('discord.js');
 const express = require('express');
 const fs = require('node:fs');
@@ -24,6 +31,7 @@ const ALLOWED_USER_ID = '1343244701507260416';
 const JOIN_GUILD_ID = '1455924604085473361';
 const JOIN_CHANNEL_ID = '1455930364810756169';
 const BOOST_CHANNEL_ID = '1455935047554040037';
+const SUGGEST_CATEGORY_ID = '1455955288346595348';
 
 const JOIN_MESSAGES = [
   member => `Welcome ${member} to **${member.guild.name}**!`,
@@ -73,22 +81,41 @@ function createEmbed(title, member) {
 
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
-  if (!message.content.startsWith(PREFIX)) return;
 
-  const fullContent = message.content.slice(PREFIX.length).trim();
-  const args = fullContent.split(/ +/);
-  const commandName = args.shift().toLowerCase();
+  if (message.content.startsWith(PREFIX)) {
+    const fullContent = message.content.slice(PREFIX.length).trim();
+    const args = fullContent.split(/ +/);
+    const commandName = args.shift().toLowerCase();
 
-  if (commandName === 'message' && message.author.id === ALLOWED_USER_ID) {
-    try {
-      await message.delete();
-      const contentToCopy = fullContent.slice('message'.length).trim();
+    if (commandName === 'message' && message.author.id === ALLOWED_USER_ID) {
+      try {
+        await message.delete();
+        const contentToCopy = fullContent.slice('message'.length).trim();
+        await message.channel.send({
+          content: contentToCopy,
+          allowedMentions: { parse: ['users', 'roles'] }
+        });
+      } catch (error) { console.error('❌ Failed:', error); }
+    }
+
+    if (commandName === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
+      const button = new ButtonBuilder()
+        .setCustomId('suggest_create')
+        .setLabel('Create Suggestion Ticket')
+        .setStyle(ButtonStyle.Primary);
+
+      const row = new ActionRowBuilder().addComponents(button);
+
       await message.channel.send({
-        content: contentToCopy,
-        allowedMentions: { parse: ['users', 'roles'] }
+        content: 'Click the button to create a suggestion ticket:',
+        components: [row]
       });
-    } catch (error) {
-      console.error('❌ Failed:', error);
+    }
+
+    if (commandName === 'close') {
+      if (message.channel.name.startsWith('suggest-')) {
+        await message.channel.delete().catch(() => {});
+      }
     }
   }
 });
@@ -112,46 +139,90 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
   if (!oldMember.premiumSince && newMember.premiumSince) {
     const text = BOOST_MESSAGES[Math.floor(Math.random() * BOOST_MESSAGES.length)](newMember);
     const embed = createEmbed(text, newMember);
-
     try { await channel.send({ embeds: [embed] }); } catch {}
+  }
+});
+
+client.on(Events.InteractionCreate, async interaction => {
+  if (interaction.isButton() && interaction.customId === 'suggest_create') {
+    const modal = new ModalBuilder()
+      .setCustomId('suggest_modal')
+      .setTitle('Create Suggestion');
+
+    const titleInput = new TextInputBuilder()
+      .setCustomId('suggest_title')
+      .setLabel('Title')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const descInput = new TextInputBuilder()
+      .setCustomId('suggest_desc')
+      .setLabel('Description')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true);
+
+    const row1 = new ActionRowBuilder().addComponents(titleInput);
+    const row2 = new ActionRowBuilder().addComponents(descInput);
+
+    modal.addComponents(row1, row2);
+
+    await interaction.showModal(modal);
+  }
+
+  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'suggest_modal') {
+    const title = interaction.fields.getTextInputValue('suggest_title');
+    const description = interaction.fields.getTextInputValue('suggest_desc');
+    const guild = interaction.guild;
+
+    const category = guild.channels.cache.get(SUGGEST_CATEGORY_ID);
+    if (!category) return await interaction.reply({ content: 'Category not found.', ephemeral: true });
+
+    const channelName = `suggest-${Math.floor(Math.random() * 10000)}`;
+    const everyone = guild.roles.everyone;
+
+    const channel = await guild.channels.create({
+      name: channelName,
+      type: 0, // GUILD_TEXT
+      parent: SUGGEST_CATEGORY_ID,
+      permissionOverwrites: [
+        { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] },
+        { id: everyone.id, deny: ['ViewChannel'] },
+        // Allow admins (assuming ADMINISTRATOR role)
+        ...guild.roles.cache.filter(r => r.permissions.has('Administrator')).map(r => ({
+          id: r.id,
+          allow: ['ViewChannel', 'SendMessages']
+        }))
+      ]
+    });
+
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description)
+      .setColor(randomColor())
+      .setFooter({ text: `Opened by ${interaction.user.tag}` })
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+    await interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
   }
 });
 
 async function loadAndDeployCommands() {
   const commandsPath = path.join(__dirname, 'commands');
   const slashCommands = [];
-
   if (fs.existsSync(commandsPath)) {
     const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
     for (const file of commandFiles) {
       const loaded = require(path.join(commandsPath, file));
       if (Array.isArray(loaded)) {
-        loaded.forEach(cmd => {
-          if (cmd.data && cmd.execute) {
-            client.commands.set(cmd.data.name, cmd);
-            slashCommands.push(cmd.data.toJSON());
-          }
-        });
-      } else if (loaded.data && loaded.execute) {
-        client.commands.set(loaded.data.name, loaded);
-        slashCommands.push(loaded.data.toJSON());
-      }
+        loaded.forEach(cmd => { if (cmd.data && cmd.execute) { client.commands.set(cmd.data.name, cmd); slashCommands.push(cmd.data.toJSON()); } });
+      } else if (loaded.data && loaded.execute) { client.commands.set(loaded.data.name, loaded); slashCommands.push(loaded.data.toJSON()); }
     }
   }
-
   const rest = new REST({ version: '10' }).setToken(token);
   await rest.put(Routes.applicationCommands(clientId), { body: slashCommands });
 }
 
 loadAndDeployCommands();
-
 client.once(Events.ClientReady, () => console.log('✅ ProFlare Bot online'));
-
-client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-  const command = client.commands.get(interaction.commandName);
-  if (!command) return;
-  try { await command.execute(interaction); } catch { if (!interaction.replied) await interaction.reply({ content: '❌ Error!', ephemeral: true }); }
-});
-
 client.login(token);
