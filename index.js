@@ -99,6 +99,12 @@ client.on(Events.MessageCreate, async message => {
     }
 
     if (commandName === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
+      const embed = new EmbedBuilder()
+        .setTitle('📩 Suggestion Panel')
+        .setDescription('Click the button below to create a suggestion ticket!')
+        .setColor(randomColor())
+        .setFooter({ text: 'Only one ticket per suggestion.' });
+
       const button = new ButtonBuilder()
         .setCustomId('suggest_create')
         .setLabel('Create Suggestion Ticket')
@@ -107,7 +113,7 @@ client.on(Events.MessageCreate, async message => {
       const row = new ActionRowBuilder().addComponents(button);
 
       await message.channel.send({
-        content: 'Click the button to create a suggestion ticket:',
+        embeds: [embed],
         components: [row]
       });
     }
@@ -187,7 +193,6 @@ client.on(Events.InteractionCreate, async interaction => {
       permissionOverwrites: [
         { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] },
         { id: everyone.id, deny: ['ViewChannel'] },
-        // Allow admins (assuming ADMINISTRATOR role)
         ...guild.roles.cache.filter(r => r.permissions.has('Administrator')).map(r => ({
           id: r.id,
           allow: ['ViewChannel', 'SendMessages']
@@ -197,7 +202,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const embed = new EmbedBuilder()
       .setTitle(title)
-      .setDescription(description)
+      .setDescription(`${description}\n\n💡 **Do \`!close\` to close this ticket.**`)
       .setColor(randomColor())
       .setFooter({ text: `Opened by ${interaction.user.tag}` })
       .setTimestamp();
