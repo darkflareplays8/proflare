@@ -51,7 +51,13 @@ const BOOST_MESSAGES = [
   member => `${member} just became a server booster!`
 ];
 
-const BUG_TYPES = ['autototem', 'autorocket', 'performanceeternal', 'other'];
+// Bug types with proper display names
+const BUG_TYPES = [
+  { id: 'autototem', label: 'AutoTotem' },
+  { id: 'autorocket', label: 'AutoRocket' },
+  { id: 'performanceeternal', label: 'Performance Eternal' },
+  { id: 'other', label: 'Other' }
+];
 
 // --- EXPRESS HEALTH ---
 const app = express();
@@ -136,8 +142,8 @@ client.on(Events.MessageCreate, async message => {
     BUG_TYPES.forEach(type => {
       row.addComponents(
         new ButtonBuilder()
-          .setCustomId(`bug_${type}`)
-          .setLabel(type.charAt(0).toUpperCase() + type.slice(1))
+          .setCustomId(`bug_${type.id}`)
+          .setLabel(type.label) // Proper display names
           .setStyle(ButtonStyle.Danger)
       );
     });
@@ -147,7 +153,7 @@ client.on(Events.MessageCreate, async message => {
 
   // !close command
   if (commandName === 'close') {
-    if (message.channel.name.startsWith('suggest-') || BUG_TYPES.some(t => message.channel.name.startsWith(t))) {
+    if (message.channel.name.startsWith('suggest-') || BUG_TYPES.some(t => message.channel.name.startsWith(t.id))) {
       await message.channel.delete().catch(() => {});
     }
   }
@@ -211,7 +217,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const bugType = interaction.customId.split('_')[1];
       const modal = new ModalBuilder()
         .setCustomId(`bug_modal_${bugType}`)
-        .setTitle(`${bugType.charAt(0).toUpperCase() + bugType.slice(1)} Bug Report`);
+        .setTitle(`${BUG_TYPES.find(t => t.id === bugType).label} Bug Report`);
 
       const titleInput = new TextInputBuilder()
         .setCustomId('bug_title')
