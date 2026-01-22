@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Discord Verification</title>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <style>
+    body { font-family: Arial; text-align: center; padding: 2rem; background: #f4f4f4; }
+    .verify-box { background: #fff; padding: 2rem; margin: 2rem auto; border-radius: 10px; max-width: 500px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; border: none; border-radius: 5px; background-color: #5865F2; color: white; cursor: pointer; }
+    button:hover { background-color: #4752c4; }
+    p { color: #555; }
+  </style>
+</head>
+<body>
+  <div class="verify-box">
+    <h1>✅ Discord Verification</h1>
+    <p>Click the box below to prove you are human.</p>
+    <form id="verifyForm">
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAACOPz8fHLMWXYOOy"></div>
+      <input type="hidden" name="userId" id="userId" value="">
+      <button type="submit">Verify</button>
+    </form>
+    <p id="status"></p>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const userId = params.get('userId');
+    if (userId) document.getElementById('userId').value = userId;
+
+    const form = document.getElementById('verifyForm');
+    const status = document.getElementById('status');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const token = document.querySelector('[name="cf-turnstile-response"]').value;
+      if (!token) { status.textContent = '❌ Complete the CAPTCHA.'; return; }
+
+      status.textContent = '⏳ Verifying...';
+
+      try {
+        const res = await fetch('https://proflare-production.up.railway.app/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ 'cf-turnstile-response': token, userId })
+        });
+        status.textContent = await res.text();
+      } catch (err) {
+        console.error(err);
+        status.textContent = '❌ Error verifying. Try again.';
+      }
+    });
+  </script>
+</body>
+</html>
