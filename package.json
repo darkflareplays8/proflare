@@ -9,6 +9,5 @@
     "discord.js": "^14.14.1",
     "express": "^4.19.2",
     "dotenv": "^16.4.5"
-    "node-fetch": "^3.3.2",
   }
 }
