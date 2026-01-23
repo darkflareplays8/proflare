@@ -1,5 +1,4 @@
 require('dotenv').config();
-const express = require('express');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,7 +26,6 @@ const {
 const {
   DISCORD_TOKEN,
   CLIENT_ID,
-  PORT,
   JOIN_CHANNEL_ID,
   BOOST_CHANNEL_ID,
   VERIFIED_ROLE_ID,
@@ -68,15 +66,6 @@ const BOOST_MESSAGES = [
 ];
 
 /* =====================
-   EXPRESS (KEEPALIVE)
-===================== */
-const app = express();
-app.get('/', (_, res) => res.send('OK'));
-app.listen(PORT || 3000, () =>
-  console.log(`🌐 Web server on ${PORT || 3000}`)
-);
-
-/* =====================
    CLIENT
 ===================== */
 const client = new Client({
@@ -101,7 +90,6 @@ client.on(Events.MessageCreate, async message => {
   const args = message.content.slice(1).trim().split(/ +/);
   const cmd = args.shift()?.toLowerCase();
 
-  /* PANEL COMMANDS */
   if (cmd === 'panel' && message.author.id === ALLOWED_USER_ID) {
     if (args[0] === 'suggest') {
       const embed = new EmbedBuilder()
@@ -155,14 +143,13 @@ client.on(Events.MessageCreate, async message => {
     }
   }
 
-  /* CLOSE TICKET */
   if (cmd === 'close' && message.channel.parentId === SUGGEST_CATEGORY_ID) {
-    return message.channel.delete().catch(() => {});
+    message.channel.delete().catch(() => {});
   }
 });
 
 /* =====================
-   JOIN EMBED
+   JOIN EMBEDS
 ===================== */
 client.on(Events.GuildMemberAdd, member => {
   const ch = member.guild.channels.cache.get(JOIN_CHANNEL_ID);
@@ -180,7 +167,7 @@ client.on(Events.GuildMemberAdd, member => {
 });
 
 /* =====================
-   BOOST EMBED
+   BOOST EMBEDS
 ===================== */
 client.on(Events.GuildMemberUpdate, (o, n) => {
   if (!o.premiumSince && n.premiumSince) {
@@ -203,13 +190,11 @@ client.on(Events.GuildMemberUpdate, (o, n) => {
    INTERACTIONS
 ===================== */
 client.on(Events.InteractionCreate, async interaction => {
-  /* VERIFY BUTTON */
   if (interaction.isButton() && interaction.customId === 'verify_button') {
     const a = Math.floor(Math.random() * 10) + 1;
     const b = Math.floor(Math.random() * 10) + 1;
-    const answer = a + b;
 
-    verificationMap.set(interaction.user.id, answer);
+    verificationMap.set(interaction.user.id, a + b);
 
     try {
       await interaction.user.send(
@@ -218,13 +203,12 @@ client.on(Events.InteractionCreate, async interaction => {
       await interaction.reply({ content: '📬 Check your DMs!', ephemeral: true });
     } catch {
       await interaction.reply({
-        content: '❌ Your DMs are closed. Open them and try again.',
+        content: '❌ Your DMs are closed.',
         ephemeral: true
       });
     }
   }
 
-  /* TICKET BUTTONS */
   if (interaction.isButton() && interaction.customId === 'suggest_create') {
     const modal = new ModalBuilder()
       .setCustomId('suggest_modal')
@@ -245,23 +229,16 @@ client.on(Events.InteractionCreate, async interaction => {
             .setRequired(true)
         )
       );
-    return interaction.showModal(modal);
+
+    interaction.showModal(modal);
   }
 
   if (interaction.type === InteractionType.ModalSubmit) {
-    const guild = interaction.guild;
-    const name =
-      interaction.customId === 'suggest_modal'
-        ? `suggest-${Math.floor(Math.random() * 9999)}`
-        : null;
-
-    if (!name) return;
-
-    const ch = await guild.channels.create({
-      name,
+    const ch = await interaction.guild.channels.create({
+      name: `suggest-${Math.floor(Math.random() * 9999)}`,
       parent: SUGGEST_CATEGORY_ID,
       permissionOverwrites: [
-        { id: guild.roles.everyone, deny: ['ViewChannel'] },
+        { id: interaction.guild.roles.everyone, deny: ['ViewChannel'] },
         { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] }
       ]
     });
@@ -280,28 +257,30 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 /* =====================
-   DM ANSWER HANDLER
+   DM VERIFICATION
 ===================== */
 client.on(Events.MessageCreate, async msg => {
-  if (!msg.guild && verificationMap.has(msg.author.id)) {
-    const expected = verificationMap.get(msg.author.id);
-    if (parseInt(msg.content) === expected) {
-      verificationMap.delete(msg.author.id);
+  if (msg.guild) return;
+  if (!verificationMap.has(msg.author.id)) return;
 
-      const guilds = client.guilds.cache.values();
-      for (const g of guilds) {
-        const m = await g.members.fetch(msg.author.id).catch(() => null);
-        if (!m) continue;
+  const expected = verificationMap.get(msg.author.id);
 
-        await m.roles.add(VERIFIED_ROLE_ID).catch(() => {});
-        const log = g.channels.cache.get(VERIFY_LOG_CHANNEL_ID);
-        log?.send(`✅ ${msg.author.tag} verified`);
-      }
+  if (parseInt(msg.content) === expected) {
+    verificationMap.delete(msg.author.id);
 
-      msg.reply('✅ Verified successfully!');
-    } else {
-      msg.reply('❌ Incorrect answer. Click verify again.');
+    for (const g of client.guilds.cache.values()) {
+      const m = await g.members.fetch(msg.author.id).catch(() => null);
+      if (!m) continue;
+
+      await m.roles.add(VERIFIED_ROLE_ID).catch(() => {});
+      g.channels.cache
+        .get(VERIFY_LOG_CHANNEL_ID)
+        ?.send(`✅ ${msg.author.tag} verified`);
     }
+
+    msg.reply('✅ Verified!');
+  } else {
+    msg.reply('❌ Incorrect answer. Click verify again.');
   }
 });
 
@@ -309,27 +288,28 @@ client.on(Events.MessageCreate, async msg => {
    SLASH COMMAND LOADER
 ===================== */
 (async () => {
-  const cmds = [];
+  const commands = [];
   const dir = path.join(__dirname, 'commands');
+
   if (fs.existsSync(dir)) {
-    for (const f of fs.readdirSync(dir)) {
-      const c = require(path.join(dir, f));
-      if (c?.data && c?.execute) {
-        client.commands.set(c.data.name, c);
-        cmds.push(c.data.toJSON());
+    for (const file of fs.readdirSync(dir)) {
+      const cmd = require(path.join(dir, file));
+      if (cmd?.data && cmd?.execute) {
+        client.commands.set(cmd.data.name, cmd);
+        commands.push(cmd.data.toJSON());
       }
     }
   }
 
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: cmds });
+  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 })();
 
 /* =====================
    READY
 ===================== */
-client.once(Events.ClientReady, () =>
-  console.log(`✅ Bot online as ${client.user.tag}`)
-);
+client.once(Events.ClientReady, () => {
+  console.log(`✅ Bot online as ${client.user.tag}`);
+});
 
 client.login(DISCORD_TOKEN);
