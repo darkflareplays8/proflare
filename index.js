@@ -8,8 +8,6 @@ const {
   Collection,
   Partials,
   Events,
-  REST,
-  Routes,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
@@ -31,7 +29,9 @@ const {
   CLIENT_ID,
   VERIFIED_ROLE_ID,
   VERIFY_LOG_CHANNEL_ID,
-  SUGGEST_CATEGORY_ID
+  SUGGEST_CATEGORY_ID,
+  JOIN_CHANNEL_ID,
+  BOOST_CHANNEL_ID
 } = process.env;
 
 if (!DISCORD_TOKEN || !CLIENT_ID) {
@@ -46,9 +46,26 @@ console.log('[ENV] Loaded successfully');
 ===================== */
 const PREFIX = '!';
 const ALLOWED_USER_ID = '1343244701507260416';
-const JOIN_GUILD_ID = '1455924604085473361';
-const JOIN_CHANNEL_ID = '1455930364810756169';
-const BOOST_CHANNEL_ID = '1455935047554040037';
+
+const BUG_TYPES = [
+  { id: 'autototem', label: 'AutoTotem' },
+  { id: 'autorocket', label: 'AutoRocket' },
+  { id: 'performanceeternal', label: 'Performance Eternal' },
+  { id: 'other', label: 'Other' }
+];
+
+const JOIN_MESSAGES = [
+  member => `Welcome **${member.user.username}**!`,
+  member => `🎉 Everyone welcome **${member.user.username}**!`,
+  member => `🔥 **${member.user.username}** joined the server`,
+  member => `💫 Glad you’re here, **${member.user.username}**`
+];
+
+const BOOST_MESSAGES = [
+  member => `🚀 **${member.user.username}** just boosted the server!`,
+  member => `💎 Thanks for the boost, **${member.user.username}**!`,
+  member => `🔥 **${member.user.username}** is supporting us!`
+];
 
 /* =====================
    CLIENT
@@ -61,7 +78,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
-  partials: [Partials.Channel, Partials.Message]
+  partials: [Partials.Channel]
 });
 
 client.commands = new Collection();
@@ -71,38 +88,19 @@ client.commands = new Collection();
 ===================== */
 const randomColor = () => Math.floor(Math.random() * 0xffffff);
 
-const JOIN_MESSAGES = [
-  m => `👋 Welcome **${m.user.username}**!`,
-  m => `🎉 Everyone welcome **${m.user.username}**!`,
-  m => `🔥 **${m.user.username}** joined the server`,
-  m => `💫 Glad you’re here, **${m.user.username}**`,
-];
-
-const BOOST_MESSAGES = [
-  m => `🚀 **${m.user.username}** just boosted the server!`,
-  m => `💎 Thanks for the boost, **${m.user.username}**!`,
-  m => `🔥 **${m.user.username}** is supporting us!`,
-];
-
-const BUG_TYPES = [
-  { id: 'autototem', label: 'AutoTotem' },
-  { id: 'autorocket', label: 'AutoRocket' },
-  { id: 'performanceeternal', label: 'Performance Eternal' },
-  { id: 'other', label: 'Other' }
-];
-
 const verificationMap = new Map();
 
-function createEmbed(description, member) {
+function createEmbed(title, member) {
   return new EmbedBuilder()
-    .setDescription(description)
-    .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+    .setTitle(title)
+    .setDescription(member.toString())
     .setColor(randomColor())
+    .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
     .setTimestamp();
 }
 
 /* =====================
-   MESSAGE HANDLER
+   MESSAGE COMMANDS
 ===================== */
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
@@ -132,21 +130,25 @@ client.on(Events.MessageCreate, async message => {
   }
 
   if (!message.content.startsWith(PREFIX)) return;
+
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const cmd = args.shift()?.toLowerCase();
 
-  // !message (allowed user)
+  // !message command
   if (cmd === 'message' && message.author.id === ALLOWED_USER_ID) {
     const contentToSend = args.join(' ');
-    console.log('[CMD] !message ->', contentToSend);
     try {
       await message.delete();
       await message.channel.send({ content: contentToSend });
-    } catch (err) { console.error('[CMD] Failed !message:', err); }
+    } catch (err) {
+      console.error('[MESSAGE]', err);
+    }
   }
 
   // !panel verify
   if (cmd === 'panel' && args[0] === 'verify' && message.author.id === ALLOWED_USER_ID) {
+    console.log('[CMD] !panel verify used');
+
     const embed = new EmbedBuilder()
       .setTitle('✅ Verification')
       .setDescription('Click the button below to verify.')
@@ -162,28 +164,11 @@ client.on(Events.MessageCreate, async message => {
     return message.channel.send({ embeds: [embed], components: [row] });
   }
 
-  // !panel suggest
-  if (cmd === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
-    const embed = new EmbedBuilder()
-      .setTitle('📩 Suggestion Panel')
-      .setDescription('Click below to create a suggestion ticket')
-      .setColor(randomColor());
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('suggest_create')
-        .setLabel('Create Suggestion')
-        .setStyle(ButtonStyle.Primary)
-    );
-
-    return message.channel.send({ embeds: [embed], components: [row] });
-  }
-
   // !panel bug
   if (cmd === 'panel' && args[0] === 'bug' && message.author.id === ALLOWED_USER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('🐛 Bug Report Panel')
-      .setDescription('Click a button below to report a bug')
+      .setDescription('Click a button below to create a bug ticket.')
       .setColor(randomColor());
 
     const row = new ActionRowBuilder();
@@ -199,126 +184,139 @@ client.on(Events.MessageCreate, async message => {
     return message.channel.send({ embeds: [embed], components: [row] });
   }
 
-  // !close tickets
+  // !panel suggest
+  if (cmd === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
+    const embed = new EmbedBuilder()
+      .setTitle('📩 Suggestion Panel')
+      .setDescription('Click the button below to create a suggestion ticket.')
+      .setColor(randomColor());
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('suggest_create')
+        .setLabel('Create Suggestion')
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    return message.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  // !close command
   if (cmd === 'close') {
-    const name = message.channel.name;
-    const isTicket =
-      name.startsWith('suggest-') ||
-      BUG_TYPES.some(t => name.startsWith(t.id));
-
-    if (!isTicket) return;
-
-    console.log('[TICKET] Closing ticket:', name);
-
-    try {
-      await message.channel.send('🔒 Closing ticket…');
-      await message.channel.delete();
-    } catch (err) {
-      console.error('[TICKET] Failed to close:', err);
+    if (
+      message.channel.name.startsWith('suggest-') ||
+      BUG_TYPES.some(t => message.channel.name.startsWith(t.id))
+    ) {
+      await message.channel.delete().catch(() => {});
     }
   }
 });
 
 /* =====================
-   JOIN/BOOST MESSAGES
+   JOIN / BOOST MESSAGES
 ===================== */
 client.on(Events.GuildMemberAdd, member => {
-  if (member.guild.id !== JOIN_GUILD_ID) return;
-  const channel = member.guild.channels.cache.get(JOIN_CHANNEL_ID);
-  if (!channel) return;
+  const ch = member.guild.channels.cache.get(JOIN_CHANNEL_ID);
+  if (!ch) return;
 
-  const text = JOIN_MESSAGES[Math.floor(Math.random() * JOIN_MESSAGES.length)](member);
-  channel.send({ embeds: [createEmbed(text, member)] }).catch(() => {});
+  const embed = createEmbed(
+    JOIN_MESSAGES[Math.floor(Math.random() * JOIN_MESSAGES.length)](member),
+    member
+  );
+
+  ch.send({ embeds: [embed] }).catch(() => {});
 });
 
 client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
-  if (newMember.guild.id !== JOIN_GUILD_ID) return;
-  const channel = newMember.guild.channels.cache.get(BOOST_CHANNEL_ID);
-  if (!channel) return;
-
   if (!oldMember.premiumSince && newMember.premiumSince) {
-    const text = BOOST_MESSAGES[Math.floor(Math.random() * BOOST_MESSAGES.length)](newMember);
-    channel.send({ embeds: [createEmbed(text, newMember)] }).catch(() => {});
+    const ch = newMember.guild.channels.cache.get(BOOST_CHANNEL_ID);
+    if (!ch) return;
+
+    const embed = createEmbed(
+      BOOST_MESSAGES[Math.floor(Math.random() * BOOST_MESSAGES.length)](newMember),
+      newMember
+    );
+
+    ch.send({ embeds: [embed] }).catch(() => {});
   }
 });
 
 /* =====================
-   INTERACTIONS
+   INTERACTIONS (Buttons / Modals)
 ===================== */
 client.on(Events.InteractionCreate, async interaction => {
-  // VERIFY BUTTON
-  if (interaction.isButton() && interaction.customId === 'verify_button') {
-    console.log('[VERIFY] Button clicked by', interaction.user.tag);
+  if (interaction.isButton()) {
+    // Verify button
+    if (interaction.customId === 'verify_button') {
+      console.log('[VERIFY] Button clicked by', interaction.user.tag);
 
-    const a = Math.floor(Math.random() * 10) + 1;
-    const b = Math.floor(Math.random() * 10) + 1;
+      const a = Math.floor(Math.random() * 10) + 1;
+      const b = Math.floor(Math.random() * 10) + 1;
 
-    verificationMap.set(interaction.user.id, a + b);
+      verificationMap.set(interaction.user.id, a + b);
 
-    try {
-      await interaction.user.send(
-        `🧮 **Verification Required**\nWhat is **${a} + ${b}**?\nReply with the number.`
-      );
-      await interaction.reply({ content: '📬 Check your DMs!', ephemeral: true });
-    } catch (err) {
-      console.error('[VERIFY] DM failed', err);
-      await interaction.reply({
-        content: '❌ Your DMs are closed.',
-        ephemeral: true
-      });
+      try {
+        await interaction.user.send(
+          `🧮 **Verification Required**\n\nWhat is **${a} + ${b}**? Reply with the number.`
+        );
+        await interaction.reply({ content: '📬 Check your DMs!', ephemeral: true });
+      } catch (err) {
+        console.error('[VERIFY] DM failed', err);
+        await interaction.reply({ content: '❌ Your DMs are closed.', ephemeral: true });
+      }
+    }
+
+    // Suggestion modal
+    if (interaction.customId === 'suggest_create') {
+      const modal = new ModalBuilder()
+        .setCustomId('suggest_modal')
+        .setTitle('Create Suggestion');
+
+      const titleInput = new TextInputBuilder()
+        .setCustomId('suggest_title')
+        .setLabel('Title')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      const descInput = new TextInputBuilder()
+        .setCustomId('suggest_desc')
+        .setLabel('Description')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(titleInput));
+      modal.addComponents(new ActionRowBuilder().addComponents(descInput));
+
+      await interaction.showModal(modal);
+    }
+
+    // Bug buttons
+    if (interaction.customId.startsWith('bug_')) {
+      const bugType = interaction.customId.split('_')[1];
+      const modal = new ModalBuilder()
+        .setCustomId(`bug_modal_${bugType}`)
+        .setTitle(`${BUG_TYPES.find(t => t.id === bugType).label} Bug Report`);
+
+      const titleInput = new TextInputBuilder()
+        .setCustomId('bug_title')
+        .setLabel('Title')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      const descInput = new TextInputBuilder()
+        .setCustomId('bug_desc')
+        .setLabel('Description')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(titleInput));
+      modal.addComponents(new ActionRowBuilder().addComponents(descInput));
+
+      await interaction.showModal(modal);
     }
   }
 
-  // SUGGESTION BUTTON
-  if (interaction.isButton() && interaction.customId === 'suggest_create') {
-    const modal = new ModalBuilder()
-      .setCustomId('suggest_modal')
-      .setTitle('Create Suggestion');
-
-    const titleInput = new TextInputBuilder()
-      .setCustomId('suggest_title')
-      .setLabel('Title')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    const descInput = new TextInputBuilder()
-      .setCustomId('suggest_desc')
-      .setLabel('Description')
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput));
-    modal.addComponents(new ActionRowBuilder().addComponents(descInput));
-
-    await interaction.showModal(modal);
-  }
-
-  // BUG BUTTONS
-  if (interaction.isButton() && interaction.customId.startsWith('bug_')) {
-    const bugType = interaction.customId.split('_')[1];
-    const modal = new ModalBuilder()
-      .setCustomId(`bug_modal_${bugType}`)
-      .setTitle(`${BUG_TYPES.find(t => t.id === bugType).label} Bug Report`);
-
-    const titleInput = new TextInputBuilder()
-      .setCustomId('bug_title')
-      .setLabel('Title')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    const descInput = new TextInputBuilder()
-      .setCustomId('bug_desc')
-      .setLabel('Description')
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(titleInput));
-    modal.addComponents(new ActionRowBuilder().addComponents(descInput));
-
-    await interaction.showModal(modal);
-  }
-
-  // MODAL SUBMIT
+  // Modal submit
   if (interaction.type === InteractionType.ModalSubmit) {
     const guild = interaction.guild;
 
@@ -336,9 +334,10 @@ client.on(Events.InteractionCreate, async interaction => {
     } else return;
 
     const everyone = guild.roles.everyone;
+
     const channel = await guild.channels.create({
       name: channelName,
-      type: 0,
+      type: 0, // GUILD_TEXT
       parent: SUGGEST_CATEGORY_ID,
       permissionOverwrites: [
         { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] },
@@ -351,56 +350,26 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const embed = new EmbedBuilder()
       .setTitle(title)
-      .setDescription(`${description}\n\n💡 Use \`!close\` to close this ticket.`)
+      .setDescription(`${description}\n\n💡 **Use \`!close\` to close this ticket.**`)
       .setColor(randomColor())
       .setFooter({ text: `Opened by ${interaction.user.tag}` })
       .setTimestamp();
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setLabel('Go to channel')
-        .setStyle(ButtonStyle.Link)
-        .setURL(`https://discord.com/channels/${guild.id}/${channel.id}`)
-    );
+    await channel.send({ embeds: [embed] });
 
-    await channel.send({ embeds: [embed], components: [row] });
-    await interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
+    // Ticket confirmation with channel link
+    await interaction.reply({
+      content: `✅ Ticket created: <#${channel.id}>`,
+      ephemeral: true
+    });
   }
 });
 
 /* =====================
-   SLASH COMMAND LOADER (FIXED TO SUPPORT ARRAYS)
+   SLASH COMMANDS
 ===================== */
-(async () => {
-  console.log('[SLASH] Loading slash commands…');
-
-  const commands = [];
-  const dir = path.join(__dirname, 'commands');
-
-  if (fs.existsSync(dir)) {
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
-    for (const file of files) {
-      const loaded = require(path.join(dir, file));
-      // Handle arrays
-      if (Array.isArray(loaded)) {
-        loaded.forEach(cmd => {
-          if (cmd?.data && cmd?.execute) {
-            client.commands.set(cmd.data.name, cmd);
-            commands.push(cmd.data.toJSON());
-          }
-        });
-      } else if (loaded?.data && loaded?.execute) {
-        client.commands.set(loaded.data.name, loaded);
-        commands.push(loaded.data.toJSON());
-      }
-    }
-  }
-
-  const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-
-  console.log('[SLASH] Registered', commands.length, 'commands');
-})();
+// Deploy commands via separate script so Railway deploys re-register them automatically
+require('./deploy-commands'); // <--- this will handle deploying commands each deploy
 
 /* =====================
    READY
