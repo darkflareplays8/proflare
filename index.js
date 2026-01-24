@@ -17,11 +17,11 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  PermissionsBitField
+  InteractionType
 } = require('discord.js');
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 
 /* =====================
    ENV
@@ -30,24 +30,25 @@ const {
   DISCORD_TOKEN,
   CLIENT_ID,
   VERIFIED_ROLE_ID,
-  VERIFY_LOG_CHANNEL_ID
+  VERIFY_LOG_CHANNEL_ID,
+  SUGGEST_CATEGORY_ID
 } = process.env;
 
 if (!DISCORD_TOKEN || !CLIENT_ID) {
-  console.error('[FATAL] Missing env vars');
+  console.error('[FATAL] Missing DISCORD_TOKEN or CLIENT_ID');
   process.exit(1);
 }
+
+console.log('[ENV] Loaded successfully');
 
 /* =====================
    CONSTANTS
 ===================== */
 const PREFIX = '!';
 const ALLOWED_USER_ID = '1343244701507260416';
-
+const JOIN_GUILD_ID = '1455924604085473361';
 const JOIN_CHANNEL_ID = '1455930364810756169';
 const BOOST_CHANNEL_ID = '1455935047554040037';
-
-const TICKET_CATEGORY_ID = '1455955288346595348';
 
 /* =====================
    CLIENT
@@ -60,7 +61,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
-  partials: [Partials.Channel]
+  partials: [Partials.Channel, Partials.Message]
 });
 
 client.commands = new Collection();
@@ -70,30 +71,35 @@ client.commands = new Collection();
 ===================== */
 const randomColor = () => Math.floor(Math.random() * 0xffffff);
 
-/* =====================
-   ROTATING MESSAGES
-===================== */
-const joinMessages = [
-  '👋 Welcome {user}!',
-  '🔥 {user} just joined!',
-  '🎉 Everyone welcome {user}!',
-  '💙 Glad you’re here {user}!'
+const JOIN_MESSAGES = [
+  m => `👋 Welcome **${m.user.username}**!`,
+  m => `🎉 Everyone welcome **${m.user.username}**!`,
+  m => `🔥 **${m.user.username}** joined the server`,
+  m => `💫 Glad you’re here, **${m.user.username}**`,
 ];
 
-const boostMessages = [
-  '🚀 {user} boosted the server!',
-  '💜 Huge thanks to {user}!',
-  '⭐ {user} is a legend!',
-  '🔥 Boost received from {user}!'
+const BOOST_MESSAGES = [
+  m => `🚀 **${m.user.username}** just boosted the server!`,
+  m => `💎 Thanks for the boost, **${m.user.username}**!`,
+  m => `🔥 **${m.user.username}** is supporting us!`,
 ];
 
-let joinIndex = 0;
-let boostIndex = 0;
+const BUG_TYPES = [
+  { id: 'autototem', label: 'AutoTotem' },
+  { id: 'autorocket', label: 'AutoRocket' },
+  { id: 'performanceeternal', label: 'Performance Eternal' },
+  { id: 'other', label: 'Other' }
+];
 
-/* =====================
-   VERIFICATION STATE
-===================== */
 const verificationMap = new Map();
+
+function createEmbed(description, member) {
+  return new EmbedBuilder()
+    .setDescription(description)
+    .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+    .setColor(randomColor())
+    .setTimestamp();
+}
 
 /* =====================
    MESSAGE HANDLER
@@ -101,8 +107,10 @@ const verificationMap = new Map();
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
 
+  // DM verification reply
   if (!message.guild && verificationMap.has(message.author.id)) {
     const expected = verificationMap.get(message.author.id);
+    console.log('[VERIFY] DM from', message.author.tag, '->', message.content);
 
     if (parseInt(message.content) === expected) {
       verificationMap.delete(message.author.id);
@@ -111,7 +119,7 @@ client.on(Events.MessageCreate, async message => {
         const member = await guild.members.fetch(message.author.id).catch(() => null);
         if (!member) continue;
 
-        await member.roles.add(VERIFIED_ROLE_ID).catch(() => {});
+        await member.roles.add(VERIFIED_ROLE_ID).catch(console.error);
         guild.channels.cache
           .get(VERIFY_LOG_CHANNEL_ID)
           ?.send(`✅ ${message.author.tag} verified`);
@@ -124,10 +132,20 @@ client.on(Events.MessageCreate, async message => {
   }
 
   if (!message.content.startsWith(PREFIX)) return;
-
-  const args = message.content.slice(1).trim().split(/ +/);
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const cmd = args.shift()?.toLowerCase();
 
+  // !message (allowed user)
+  if (cmd === 'message' && message.author.id === ALLOWED_USER_ID) {
+    const contentToSend = args.join(' ');
+    console.log('[CMD] !message ->', contentToSend);
+    try {
+      await message.delete();
+      await message.channel.send({ content: contentToSend });
+    } catch (err) { console.error('[CMD] Failed !message:', err); }
+  }
+
+  // !panel verify
   if (cmd === 'panel' && args[0] === 'verify' && message.author.id === ALLOWED_USER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('✅ Verification')
@@ -144,36 +162,83 @@ client.on(Events.MessageCreate, async message => {
     return message.channel.send({ embeds: [embed], components: [row] });
   }
 
-  if (cmd === 'panel' && args[0] === 'bug' && message.author.id === ALLOWED_USER_ID) {
+  // !panel suggest
+  if (cmd === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
     const embed = new EmbedBuilder()
-      .setTitle('🐞 Bug Reports')
-      .setDescription('Choose what your bug relates to.')
+      .setTitle('📩 Suggestion Panel')
+      .setDescription('Click below to create a suggestion ticket')
       .setColor(randomColor());
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('bug_autototem').setLabel('AutoTotem').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('bug_autorocket').setLabel('AutoRocket').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('bug_performance').setLabel('Performance Eternal').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('bug_other').setLabel('Other').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder()
+        .setCustomId('suggest_create')
+        .setLabel('Create Suggestion')
+        .setStyle(ButtonStyle.Primary)
     );
 
     return message.channel.send({ embeds: [embed], components: [row] });
   }
 
-  if (cmd === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
+  // !panel bug
+  if (cmd === 'panel' && args[0] === 'bug' && message.author.id === ALLOWED_USER_ID) {
     const embed = new EmbedBuilder()
-      .setTitle('💡 Suggestions')
-      .setDescription('Click below to submit a suggestion.')
+      .setTitle('🐛 Bug Report Panel')
+      .setDescription('Click a button below to report a bug')
       .setColor(randomColor());
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('suggest_button')
-        .setLabel('Make a Suggestion')
-        .setStyle(ButtonStyle.Success)
-    );
+    const row = new ActionRowBuilder();
+    BUG_TYPES.forEach(type => {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`bug_${type.id}`)
+          .setLabel(type.label)
+          .setStyle(ButtonStyle.Danger)
+      );
+    });
 
     return message.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  // !close tickets
+  if (cmd === 'close') {
+    const name = message.channel.name;
+    const isTicket =
+      name.startsWith('suggest-') ||
+      BUG_TYPES.some(t => name.startsWith(t.id));
+
+    if (!isTicket) return;
+
+    console.log('[TICKET] Closing ticket:', name);
+
+    try {
+      await message.channel.send('🔒 Closing ticket…');
+      await message.channel.delete();
+    } catch (err) {
+      console.error('[TICKET] Failed to close:', err);
+    }
+  }
+});
+
+/* =====================
+   JOIN/BOOST MESSAGES
+===================== */
+client.on(Events.GuildMemberAdd, member => {
+  if (member.guild.id !== JOIN_GUILD_ID) return;
+  const channel = member.guild.channels.cache.get(JOIN_CHANNEL_ID);
+  if (!channel) return;
+
+  const text = JOIN_MESSAGES[Math.floor(Math.random() * JOIN_MESSAGES.length)](member);
+  channel.send({ embeds: [createEmbed(text, member)] }).catch(() => {});
+});
+
+client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+  if (newMember.guild.id !== JOIN_GUILD_ID) return;
+  const channel = newMember.guild.channels.cache.get(BOOST_CHANNEL_ID);
+  if (!channel) return;
+
+  if (!oldMember.premiumSince && newMember.premiumSince) {
+    const text = BOOST_MESSAGES[Math.floor(Math.random() * BOOST_MESSAGES.length)](newMember);
+    channel.send({ embeds: [createEmbed(text, newMember)] }).catch(() => {});
   }
 });
 
@@ -181,161 +246,141 @@ client.on(Events.MessageCreate, async message => {
    INTERACTIONS
 ===================== */
 client.on(Events.InteractionCreate, async interaction => {
+  // VERIFY BUTTON
   if (interaction.isButton() && interaction.customId === 'verify_button') {
+    console.log('[VERIFY] Button clicked by', interaction.user.tag);
+
     const a = Math.floor(Math.random() * 10) + 1;
     const b = Math.floor(Math.random() * 10) + 1;
+
     verificationMap.set(interaction.user.id, a + b);
 
     try {
-      await interaction.user.send(`🧮 What is **${a} + ${b}**?`);
+      await interaction.user.send(
+        `🧮 **Verification Required**\nWhat is **${a} + ${b}**?\nReply with the number.`
+      );
       await interaction.reply({ content: '📬 Check your DMs!', ephemeral: true });
-    } catch {
-      await interaction.reply({ content: '❌ DMs closed.', ephemeral: true });
+    } catch (err) {
+      console.error('[VERIFY] DM failed', err);
+      await interaction.reply({
+        content: '❌ Your DMs are closed.',
+        ephemeral: true
+      });
     }
   }
 
-  if (interaction.isButton() && interaction.customId.startsWith('bug_')) {
-    const modal = new ModalBuilder()
-      .setCustomId(`bug_modal_${interaction.customId}`)
-      .setTitle('Bug Report');
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('bug_desc')
-          .setLabel('Describe the bug')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-      )
-    );
-
-    return interaction.showModal(modal);
-  }
-
-  if (interaction.isButton() && interaction.customId === 'suggest_button') {
+  // SUGGESTION BUTTON
+  if (interaction.isButton() && interaction.customId === 'suggest_create') {
     const modal = new ModalBuilder()
       .setCustomId('suggest_modal')
-      .setTitle('Suggestion');
+      .setTitle('Create Suggestion');
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('suggest_text')
-          .setLabel('Your suggestion')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-      )
-    );
+    const titleInput = new TextInputBuilder()
+      .setCustomId('suggest_title')
+      .setLabel('Title')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
 
-    return interaction.showModal(modal);
+    const descInput = new TextInputBuilder()
+      .setCustomId('suggest_desc')
+      .setLabel('Description')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput));
+    modal.addComponents(new ActionRowBuilder().addComponents(descInput));
+
+    await interaction.showModal(modal);
   }
 
-  if (interaction.isModalSubmit()) {
-    const guild = interaction.guild;
-    const category = guild.channels.cache.get(TICKET_CATEGORY_ID);
-    const ticketNum = Math.floor(Math.random() * 9999);
+  // BUG BUTTONS
+  if (interaction.isButton() && interaction.customId.startsWith('bug_')) {
+    const bugType = interaction.customId.split('_')[1];
+    const modal = new ModalBuilder()
+      .setCustomId(`bug_modal_${bugType}`)
+      .setTitle(`${BUG_TYPES.find(t => t.id === bugType).label} Bug Report`);
 
+    const titleInput = new TextInputBuilder()
+      .setCustomId('bug_title')
+      .setLabel('Title')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const descInput = new TextInputBuilder()
+      .setCustomId('bug_desc')
+      .setLabel('Description')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(titleInput));
+    modal.addComponents(new ActionRowBuilder().addComponents(descInput));
+
+    await interaction.showModal(modal);
+  }
+
+  // MODAL SUBMIT
+  if (interaction.type === InteractionType.ModalSubmit) {
+    const guild = interaction.guild;
+
+    let channelName, title, description;
+
+    if (interaction.customId === 'suggest_modal') {
+      channelName = `suggest-${Math.floor(Math.random() * 10000)}`;
+      title = interaction.fields.getTextInputValue('suggest_title');
+      description = interaction.fields.getTextInputValue('suggest_desc');
+    } else if (interaction.customId.startsWith('bug_modal_')) {
+      const bugType = interaction.customId.split('_')[2];
+      channelName = `${bugType}-${Math.floor(Math.random() * 10000)}`;
+      title = interaction.fields.getTextInputValue('bug_title');
+      description = interaction.fields.getTextInputValue('bug_desc');
+    } else return;
+
+    const everyone = guild.roles.everyone;
     const channel = await guild.channels.create({
-      name: interaction.customId.startsWith('bug_')
-        ? `bug-${ticketNum}`
-        : `suggest-${ticketNum}`,
-      parent: category,
+      name: channelName,
+      type: 0, // GUILD_TEXT
+      parent: SUGGEST_CATEGORY_ID,
       permissionOverwrites: [
-        {
-          id: guild.id,
-          deny: [PermissionsBitField.Flags.ViewChannel]
-        },
-        {
-          id: interaction.user.id,
-          allow: [
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.SendMessages,
-            PermissionsBitField.Flags.ReadMessageHistory
-          ]
-        }
+        { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] },
+        { id: everyone.id, deny: ['ViewChannel'] },
+        ...guild.roles.cache
+          .filter(r => r.permissions.has('Administrator'))
+          .map(r => ({ id: r.id, allow: ['ViewChannel', 'SendMessages'] }))
       ]
     });
 
-    if (interaction.customId.startsWith('bug_')) {
-      const desc = interaction.fields.getTextInputValue('bug_desc');
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(`${description}\n\n💡 Use \`!close\` to close this ticket.`)
+      .setColor(randomColor())
+      .setFooter({ text: `Opened by ${interaction.user.tag}` })
+      .setTimestamp();
 
-      await channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('🐞 Bug Report')
-            .setDescription(desc)
-            .setFooter({ text: `By ${interaction.user.tag}` })
-            .setColor(randomColor())
-        ]
-      });
-    }
-
-    if (interaction.customId === 'suggest_modal') {
-      const text = interaction.fields.getTextInputValue('suggest_text');
-
-      await channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('💡 Suggestion')
-            .setDescription(text)
-            .setFooter({ text: `By ${interaction.user.tag}` })
-            .setColor(randomColor())
-        ]
-      });
-    }
-
-    const confirmEmbed = new EmbedBuilder()
-      .setTitle('✅ Ticket Created')
-      .setDescription('Your ticket has been created successfully.')
-      .setColor(randomColor());
-
-    const linkRow = new ActionRowBuilder().addComponents(
+    const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel('Open Ticket')
+        .setLabel('Go to channel')
         .setStyle(ButtonStyle.Link)
         .setURL(`https://discord.com/channels/${guild.id}/${channel.id}`)
     );
 
-    return interaction.reply({
-      embeds: [confirmEmbed],
-      components: [linkRow],
-      ephemeral: true
-    });
+    await channel.send({ embeds: [embed], components: [row] });
+    await interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
   }
 });
 
 /* =====================
-   JOIN / BOOST
-===================== */
-client.on(Events.GuildMemberAdd, member => {
-  const ch = member.guild.channels.cache.get(JOIN_CHANNEL_ID);
-  if (!ch) return;
-
-  const msg = joinMessages[joinIndex].replace('{user}', `<@${member.id}>`);
-  joinIndex = (joinIndex + 1) % joinMessages.length;
-
-  ch.send(msg);
-});
-
-client.on(Events.MessageCreate, msg => {
-  if (msg.type === 8 && msg.channel.id === BOOST_CHANNEL_ID) {
-    const text = boostMessages[boostIndex].replace('{user}', `<@${msg.author.id}>`);
-    boostIndex = (boostIndex + 1) % boostMessages.length;
-    msg.channel.send(text);
-  }
-});
-
-/* =====================
-   SLASH COMMAND LOADER (ARRAY FILES)
+   SLASH COMMAND LOADER
 ===================== */
 (async () => {
+  console.log('[SLASH] Loading slash commands…');
+
   const commands = [];
   const dir = path.join(__dirname, 'commands');
 
   if (fs.existsSync(dir)) {
     for (const file of fs.readdirSync(dir)) {
-      const exported = require(path.join(dir, file));
-      for (const cmd of exported) {
+      const cmd = require(path.join(dir, file));
+      if (cmd?.data && cmd?.execute) {
         commands.push(cmd.data.toJSON());
         client.commands.set(cmd.data.name, cmd);
       }
@@ -345,7 +390,7 @@ client.on(Events.MessageCreate, msg => {
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 
-  console.log('[SLASH] Loaded', commands.length);
+  console.log('[SLASH] Registered', commands.length, 'commands');
 })();
 
 /* =====================
