@@ -1,6 +1,6 @@
 require('dotenv').config(); // MUST be first
 
-console.log('[BOOT] Starting bot…');
+console.log('[BOOT] Starting ProFlare bot…');
 
 const {
   Client,
@@ -20,7 +20,6 @@ const {
   InteractionType
 } = require('discord.js');
 
-const express = require('express');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -30,17 +29,16 @@ const path = require('node:path');
 const {
   DISCORD_TOKEN,
   CLIENT_ID,
-  PORT,
   VERIFIED_ROLE_ID,
   VERIFY_LOG_CHANNEL_ID
 } = process.env;
 
 if (!DISCORD_TOKEN || !CLIENT_ID) {
-  console.error('[FATAL] Missing token or client ID');
+  console.error('[FATAL] Missing DISCORD_TOKEN or CLIENT_ID');
   process.exit(1);
 }
 
-console.log('[ENV] Loaded');
+console.log('[ENV] Loaded successfully');
 
 /* =====================
    CONSTANTS
@@ -52,15 +50,6 @@ const JOIN_GUILD_ID = '1455924604085473361';
 const JOIN_CHANNEL_ID = '1455930364810756169';
 const BOOST_CHANNEL_ID = '1455935047554040037';
 const SUGGEST_CATEGORY_ID = '1455955288346595348';
-
-/* =====================
-   EXPRESS (KEEPALIVE ONLY)
-===================== */
-const app = express();
-app.get('/health', (_, res) => res.send('OK'));
-app.listen(PORT || 3000, () =>
-  console.log('[WEB] Health server up')
-);
 
 /* =====================
    CLIENT
@@ -89,7 +78,7 @@ const randomColor = () => Math.floor(Math.random() * 0xffffff);
 const verificationMap = new Map();
 
 /* =====================
-   MESSAGE COMMANDS
+   MESSAGE HANDLER
 ===================== */
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
@@ -97,7 +86,7 @@ client.on(Events.MessageCreate, async message => {
   // DM verification reply
   if (!message.guild && verificationMap.has(message.author.id)) {
     const expected = verificationMap.get(message.author.id);
-    console.log('[VERIFY] DM answer from', message.author.tag, message.content);
+    console.log('[VERIFY] DM from', message.author.tag, '->', message.content);
 
     if (parseInt(message.content) === expected) {
       verificationMap.delete(message.author.id);
@@ -112,7 +101,7 @@ client.on(Events.MessageCreate, async message => {
           ?.send(`✅ ${message.author.tag} verified`);
       }
 
-      return message.reply('✅ You are verified!');
+      return message.reply('✅ Verification successful!');
     } else {
       return message.reply('❌ Wrong answer. Click verify again.');
     }
@@ -125,11 +114,11 @@ client.on(Events.MessageCreate, async message => {
 
   // !panel verify
   if (cmd === 'panel' && args[0] === 'verify' && message.author.id === ALLOWED_USER_ID) {
-    console.log('[CMD] Verify panel spawned');
+    console.log('[CMD] !panel verify used');
 
     const embed = new EmbedBuilder()
       .setTitle('✅ Verification')
-      .setDescription('Click the button to verify via DM math challenge.')
+      .setDescription('Click the button below to verify via DM math challenge.')
       .setColor(randomColor());
 
     const row = new ActionRowBuilder().addComponents(
@@ -154,6 +143,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const a = Math.floor(Math.random() * 10) + 1;
     const b = Math.floor(Math.random() * 10) + 1;
+
     verificationMap.set(interaction.user.id, a + b);
 
     try {
@@ -175,7 +165,7 @@ client.on(Events.InteractionCreate, async interaction => {
    SLASH COMMAND LOADER
 ===================== */
 (async () => {
-  console.log('[SLASH] Loading commands…');
+  console.log('[SLASH] Loading slash commands…');
 
   const commands = [];
   const dir = path.join(__dirname, 'commands');
@@ -193,7 +183,7 @@ client.on(Events.InteractionCreate, async interaction => {
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
 
-  console.log('[SLASH] Registered', commands.length);
+  console.log('[SLASH] Registered', commands.length, 'commands');
 })();
 
 /* =====================
