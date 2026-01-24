@@ -1,28 +1,44 @@
-require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const { REST, Routes } = require('discord.js');
-const fs = require('node:fs');
-const path = require('node:path');
+require('dotenv').config();
 
-const commands = [];
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-  const command = require(path.join(commandsPath, file));
-  commands.push(command.data.toJSON());
-}
-
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-
-// Replace YOUR_BOT_ID with your bot's Application ID
-const clientId = 'YOUR_BOT_ID_HERE';
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
 
 (async () => {
+  const commands = [];
+  const dir = path.join(__dirname, 'commands');
+
+  if (!fs.existsSync(dir)) {
+    console.warn('[SLASH] Commands directory does not exist.');
+    return;
+  }
+
+  for (const file of fs.readdirSync(dir)) {
+    const commandModule = require(path.join(dir, file));
+
+    if (Array.isArray(commandModule)) {
+      for (const cmd of commandModule) {
+        if (cmd?.data?.toJSON) {
+          commands.push(cmd.data.toJSON());
+        } else {
+          console.warn('[SLASH] Skipped invalid command in array:', file);
+        }
+      }
+    } else if (commandModule?.data?.toJSON) {
+      commands.push(commandModule.data.toJSON());
+    } else {
+      console.warn('[SLASH] Skipped invalid command file:', file);
+    }
+  }
+
+  const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
   try {
-    console.log('Deploying commands...');
-    await rest.put(Routes.applicationCommands(clientId), { body: commands });
-    console.log('✅ Global commands deployed!');
-  } catch (error) {
-    console.error(error);
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+    console.log(`[SLASH] Registered ${commands.length} commands`);
+  } catch (err) {
+    console.error('[SLASH] Failed to register commands', err);
   }
 })();
