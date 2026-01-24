@@ -1,24 +1,28 @@
-require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
+require('dotenv').config(); // MUST be first
+
+console.log('[BOOT] Starting bot…');
 
 const {
   Client,
   GatewayIntentBits,
+  Collection,
   Partials,
   Events,
-  Collection,
+  REST,
+  Routes,
+  EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  EmbedBuilder,
-  InteractionType,
-  REST,
-  Routes
+  InteractionType
 } = require('discord.js');
+
+const express = require('express');
+const fs = require('node:fs');
+const path = require('node:path');
 
 /* =====================
    ENV
@@ -26,44 +30,37 @@ const {
 const {
   DISCORD_TOKEN,
   CLIENT_ID,
-  JOIN_CHANNEL_ID,
-  BOOST_CHANNEL_ID,
+  PORT,
   VERIFIED_ROLE_ID,
-  VERIFY_LOG_CHANNEL_ID,
-  SUGGEST_CATEGORY_ID
+  VERIFY_LOG_CHANNEL_ID
 } = process.env;
 
 if (!DISCORD_TOKEN || !CLIENT_ID) {
-  console.error('❌ Missing DISCORD_TOKEN or CLIENT_ID');
+  console.error('[FATAL] Missing token or client ID');
   process.exit(1);
 }
+
+console.log('[ENV] Loaded');
 
 /* =====================
    CONSTANTS
 ===================== */
 const PREFIX = '!';
-const ALLOWED_USER_ID = '1455955288346595348';
-const BUG_TYPES = ['AutoTotem', 'AutoRocket', 'Performance Eternal', 'Other'];
+const ALLOWED_USER_ID = '1343244701507260416';
 
-const verificationMap = new Map();
+const JOIN_GUILD_ID = '1455924604085473361';
+const JOIN_CHANNEL_ID = '1455930364810756169';
+const BOOST_CHANNEL_ID = '1455935047554040037';
+const SUGGEST_CATEGORY_ID = '1455955288346595348';
 
 /* =====================
-   HELPERS
+   EXPRESS (KEEPALIVE ONLY)
 ===================== */
-const randomColor = () => Math.floor(Math.random() * 0xffffff);
-
-const JOIN_MESSAGES = [
-  m => `👋 Welcome **${m.user.username}**!`,
-  m => `🎉 Everyone welcome **${m.user.username}**!`,
-  m => `🔥 **${m.user.username}** joined the server`,
-  m => `💫 Glad you’re here, **${m.user.username}**`
-];
-
-const BOOST_MESSAGES = [
-  m => `🚀 **${m.user.username}** just boosted the server!`,
-  m => `💎 Thanks for the boost, **${m.user.username}**!`,
-  m => `🔥 **${m.user.username}** is supporting us!`
-];
+const app = express();
+app.get('/health', (_, res) => res.send('OK'));
+app.listen(PORT || 3000, () =>
+  console.log('[WEB] Health server up')
+);
 
 /* =====================
    CLIENT
@@ -82,107 +79,67 @@ const client = new Client({
 client.commands = new Collection();
 
 /* =====================
+   HELPERS
+===================== */
+const randomColor = () => Math.floor(Math.random() * 0xffffff);
+
+/* =====================
+   VERIFICATION STATE
+===================== */
+const verificationMap = new Map();
+
+/* =====================
    MESSAGE COMMANDS
 ===================== */
 client.on(Events.MessageCreate, async message => {
-  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+  if (message.author.bot) return;
+
+  // DM verification reply
+  if (!message.guild && verificationMap.has(message.author.id)) {
+    const expected = verificationMap.get(message.author.id);
+    console.log('[VERIFY] DM answer from', message.author.tag, message.content);
+
+    if (parseInt(message.content) === expected) {
+      verificationMap.delete(message.author.id);
+
+      for (const guild of client.guilds.cache.values()) {
+        const member = await guild.members.fetch(message.author.id).catch(() => null);
+        if (!member) continue;
+
+        await member.roles.add(VERIFIED_ROLE_ID).catch(console.error);
+        guild.channels.cache
+          .get(VERIFY_LOG_CHANNEL_ID)
+          ?.send(`✅ ${message.author.tag} verified`);
+      }
+
+      return message.reply('✅ You are verified!');
+    } else {
+      return message.reply('❌ Wrong answer. Click verify again.');
+    }
+  }
+
+  if (!message.content.startsWith(PREFIX)) return;
 
   const args = message.content.slice(1).trim().split(/ +/);
   const cmd = args.shift()?.toLowerCase();
 
-  if (cmd === 'panel' && message.author.id === ALLOWED_USER_ID) {
-    if (args[0] === 'suggest') {
-      const embed = new EmbedBuilder()
-        .setTitle('📩 Suggestion Panel')
-        .setDescription('Click below to create a suggestion ticket')
-        .setColor(randomColor());
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('suggest_create')
-          .setLabel('Create Suggestion')
-          .setStyle(ButtonStyle.Primary)
-      );
-
-      return message.channel.send({ embeds: [embed], components: [row] });
-    }
-
-    if (args[0] === 'bug') {
-      const embed = new EmbedBuilder()
-        .setTitle('🐛 Bug Report Panel')
-        .setDescription('Select the bug type')
-        .setColor(randomColor());
-
-      const row = new ActionRowBuilder();
-      BUG_TYPES.forEach(t =>
-        row.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`bug_${t}`)
-            .setLabel(t)
-            .setStyle(ButtonStyle.Danger)
-        )
-      );
-
-      return message.channel.send({ embeds: [embed], components: [row] });
-    }
-
-    if (args[0] === 'verify') {
-      const embed = new EmbedBuilder()
-        .setTitle('✅ Verification')
-        .setDescription('Click the button and solve the math in DMs')
-        .setColor(randomColor());
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('verify_button')
-          .setLabel('Verify')
-          .setStyle(ButtonStyle.Success)
-      );
-
-      return message.channel.send({ embeds: [embed], components: [row] });
-    }
-  }
-
-  if (cmd === 'close' && message.channel.parentId === SUGGEST_CATEGORY_ID) {
-    message.channel.delete().catch(() => {});
-  }
-});
-
-/* =====================
-   JOIN EMBEDS
-===================== */
-client.on(Events.GuildMemberAdd, member => {
-  const ch = member.guild.channels.cache.get(JOIN_CHANNEL_ID);
-  if (!ch) return;
-
-  const embed = new EmbedBuilder()
-    .setDescription(
-      JOIN_MESSAGES[Math.floor(Math.random() * JOIN_MESSAGES.length)](member)
-    )
-    .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-    .setColor(randomColor())
-    .setTimestamp();
-
-  ch.send({ embeds: [embed] }).catch(() => {});
-});
-
-/* =====================
-   BOOST EMBEDS
-===================== */
-client.on(Events.GuildMemberUpdate, (o, n) => {
-  if (!o.premiumSince && n.premiumSince) {
-    const ch = n.guild.channels.cache.get(BOOST_CHANNEL_ID);
-    if (!ch) return;
+  // !panel verify
+  if (cmd === 'panel' && args[0] === 'verify' && message.author.id === ALLOWED_USER_ID) {
+    console.log('[CMD] Verify panel spawned');
 
     const embed = new EmbedBuilder()
-      .setDescription(
-        BOOST_MESSAGES[Math.floor(Math.random() * BOOST_MESSAGES.length)](n)
-      )
-      .setThumbnail(n.user.displayAvatarURL({ dynamic: true }))
-      .setColor(randomColor())
-      .setTimestamp();
+      .setTitle('✅ Verification')
+      .setDescription('Click the button to verify via DM math challenge.')
+      .setColor(randomColor());
 
-    ch.send({ embeds: [embed] }).catch(() => {});
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('verify_button')
+        .setLabel('Verify')
+        .setStyle(ButtonStyle.Success)
+    );
+
+    return message.channel.send({ embeds: [embed], components: [row] });
   }
 });
 
@@ -190,97 +147,27 @@ client.on(Events.GuildMemberUpdate, (o, n) => {
    INTERACTIONS
 ===================== */
 client.on(Events.InteractionCreate, async interaction => {
-  if (interaction.isButton() && interaction.customId === 'verify_button') {
+  if (!interaction.isButton()) return;
+
+  if (interaction.customId === 'verify_button') {
+    console.log('[VERIFY] Button clicked by', interaction.user.tag);
+
     const a = Math.floor(Math.random() * 10) + 1;
     const b = Math.floor(Math.random() * 10) + 1;
-
     verificationMap.set(interaction.user.id, a + b);
 
     try {
       await interaction.user.send(
-        `🧮 Verification:\nWhat is **${a} + ${b}**?\nReply with the number.`
+        `🧮 **Verification Required**\n\nWhat is **${a} + ${b}**?\nReply with the number.`
       );
       await interaction.reply({ content: '📬 Check your DMs!', ephemeral: true });
-    } catch {
+    } catch (err) {
+      console.error('[VERIFY] DM failed', err);
       await interaction.reply({
         content: '❌ Your DMs are closed.',
         ephemeral: true
       });
     }
-  }
-
-  if (interaction.isButton() && interaction.customId === 'suggest_create') {
-    const modal = new ModalBuilder()
-      .setCustomId('suggest_modal')
-      .setTitle('Create Suggestion')
-      .addComponents(
-        new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId('title')
-            .setLabel('Title')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-        ),
-        new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId('desc')
-            .setLabel('Description')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true)
-        )
-      );
-
-    interaction.showModal(modal);
-  }
-
-  if (interaction.type === InteractionType.ModalSubmit) {
-    const ch = await interaction.guild.channels.create({
-      name: `suggest-${Math.floor(Math.random() * 9999)}`,
-      parent: SUGGEST_CATEGORY_ID,
-      permissionOverwrites: [
-        { id: interaction.guild.roles.everyone, deny: ['ViewChannel'] },
-        { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] }
-      ]
-    });
-
-    const embed = new EmbedBuilder()
-      .setTitle(interaction.fields.getTextInputValue('title'))
-      .setDescription(
-        interaction.fields.getTextInputValue('desc') +
-          '\n\n🔒 Use `!close` to close this ticket.'
-      )
-      .setColor(randomColor());
-
-    ch.send({ embeds: [embed] });
-    interaction.reply({ content: `Created ${ch}`, ephemeral: true });
-  }
-});
-
-/* =====================
-   DM VERIFICATION
-===================== */
-client.on(Events.MessageCreate, async msg => {
-  if (msg.guild) return;
-  if (!verificationMap.has(msg.author.id)) return;
-
-  const expected = verificationMap.get(msg.author.id);
-
-  if (parseInt(msg.content) === expected) {
-    verificationMap.delete(msg.author.id);
-
-    for (const g of client.guilds.cache.values()) {
-      const m = await g.members.fetch(msg.author.id).catch(() => null);
-      if (!m) continue;
-
-      await m.roles.add(VERIFIED_ROLE_ID).catch(() => {});
-      g.channels.cache
-        .get(VERIFY_LOG_CHANNEL_ID)
-        ?.send(`✅ ${msg.author.tag} verified`);
-    }
-
-    msg.reply('✅ Verified!');
-  } else {
-    msg.reply('❌ Incorrect answer. Click verify again.');
   }
 });
 
@@ -288,6 +175,8 @@ client.on(Events.MessageCreate, async msg => {
    SLASH COMMAND LOADER
 ===================== */
 (async () => {
+  console.log('[SLASH] Loading commands…');
+
   const commands = [];
   const dir = path.join(__dirname, 'commands');
 
@@ -295,14 +184,16 @@ client.on(Events.MessageCreate, async msg => {
     for (const file of fs.readdirSync(dir)) {
       const cmd = require(path.join(dir, file));
       if (cmd?.data && cmd?.execute) {
-        client.commands.set(cmd.data.name, cmd);
         commands.push(cmd.data.toJSON());
+        client.commands.set(cmd.data.name, cmd);
       }
     }
   }
 
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+
+  console.log('[SLASH] Registered', commands.length);
 })();
 
 /* =====================
