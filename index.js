@@ -14,9 +14,6 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   InteractionType
 } = require('discord.js');
 
@@ -37,8 +34,6 @@ if (!DISCORD_TOKEN || !CLIENT_ID) {
   console.error('[FATAL] Missing DISCORD_TOKEN or CLIENT_ID');
   process.exit(1);
 }
-
-console.log('[ENV] Loaded successfully');
 
 /* =====================
    CONSTANTS
@@ -73,6 +68,21 @@ client.commands = new Collection();
 const randomColor = () => Math.floor(Math.random() * 0xffffff);
 
 /* =====================
+   ROTATING MESSAGES
+===================== */
+const joinMessages = [
+  user => `🔥 Welcome **${user}** to ProFlare!`,
+  user => `🚀 **${user}** just joined — W`,
+  user => `💎 Big welcome to **${user}**!`
+];
+
+const boostMessages = [
+  user => `🚀 **${user}** just boosted the server!`,
+  user => `💜 Huge thanks to **${user}** for boosting!`,
+  user => `🔥 **${user}** powered us up with a boost!`
+];
+
+/* =====================
    VERIFICATION STATE
 ===================== */
 const verificationMap = new Map();
@@ -86,7 +96,6 @@ client.on(Events.MessageCreate, async message => {
   // DM verification reply
   if (!message.guild && verificationMap.has(message.author.id)) {
     const expected = verificationMap.get(message.author.id);
-    console.log('[VERIFY] DM from', message.author.tag, '->', message.content);
 
     if (parseInt(message.content) === expected) {
       verificationMap.delete(message.author.id);
@@ -95,7 +104,7 @@ client.on(Events.MessageCreate, async message => {
         const member = await guild.members.fetch(message.author.id).catch(() => null);
         if (!member) continue;
 
-        await member.roles.add(VERIFIED_ROLE_ID).catch(console.error);
+        await member.roles.add(VERIFIED_ROLE_ID).catch(() => {});
         guild.channels.cache
           .get(VERIFY_LOG_CHANNEL_ID)
           ?.send(`✅ ${message.author.tag} verified`);
@@ -112,13 +121,11 @@ client.on(Events.MessageCreate, async message => {
   const args = message.content.slice(1).trim().split(/ +/);
   const cmd = args.shift()?.toLowerCase();
 
-  // !panel verify
+  /* ===== VERIFY PANEL ===== */
   if (cmd === 'panel' && args[0] === 'verify' && message.author.id === ALLOWED_USER_ID) {
-    console.log('[CMD] !panel verify used');
-
     const embed = new EmbedBuilder()
       .setTitle('✅ Verification')
-      .setDescription('Click the button below to verify via DM math challenge.')
+      .setDescription('Click the buttton below to verify.')
       .setColor(randomColor());
 
     const row = new ActionRowBuilder().addComponents(
@@ -126,6 +133,40 @@ client.on(Events.MessageCreate, async message => {
         .setCustomId('verify_button')
         .setLabel('Verify')
         .setStyle(ButtonStyle.Success)
+    );
+
+    return message.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  /* ===== BUG PANEL ===== */
+  if (cmd === 'panel' && args[0] === 'bug' && message.author.id === ALLOWED_USER_ID) {
+    const embed = new EmbedBuilder()
+      .setTitle('🐞 Bug Reports')
+      .setDescription('Click below to report a bug.')
+      .setColor(randomColor());
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('bug_button')
+        .setLabel('Report Bug')
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    return message.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  /* ===== SUGGEST PANEL ===== */
+  if (cmd === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
+    const embed = new EmbedBuilder()
+      .setTitle('💡 Suggestions')
+      .setDescription('Click below to submit a suggestion.')
+      .setColor(randomColor());
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('suggest_button')
+        .setLabel('Suggest')
+        .setStyle(ButtonStyle.Primary)
     );
 
     return message.channel.send({ embeds: [embed], components: [row] });
@@ -138,9 +179,8 @@ client.on(Events.MessageCreate, async message => {
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isButton()) return;
 
+  /* ===== VERIFY ===== */
   if (interaction.customId === 'verify_button') {
-    console.log('[VERIFY] Button clicked by', interaction.user.tag);
-
     const a = Math.floor(Math.random() * 10) + 1;
     const b = Math.floor(Math.random() * 10) + 1;
 
@@ -148,16 +188,51 @@ client.on(Events.InteractionCreate, async interaction => {
 
     try {
       await interaction.user.send(
-        `🧮 **Verification Required**\n\nWhat is **${a} + ${b}**?\nReply with the number.`
+        `🧮 **Verification Required**\n\nWhat is **${a} + ${b}**?`
       );
       await interaction.reply({ content: '📬 Check your DMs!', ephemeral: true });
-    } catch (err) {
-      console.error('[VERIFY] DM failed', err);
-      await interaction.reply({
-        content: '❌ Your DMs are closed.',
-        ephemeral: true
-      });
+    } catch {
+      await interaction.reply({ content: '❌ Your DMs are closed.', ephemeral: true });
     }
+  }
+
+  /* ===== BUG / SUGGEST ===== */
+  if (interaction.customId === 'bug_button' || interaction.customId === 'suggest_button') {
+    await interaction.reply({
+      content: '📩 Please DM your message to staff.',
+      ephemeral: true
+    });
+  }
+});
+
+/* =====================
+   JOIN / BOOST EVENTS
+===================== */
+client.on(Events.GuildMemberAdd, member => {
+  if (member.guild.id !== JOIN_GUILD_ID) return;
+
+  const msg = joinMessages[Math.floor(Math.random() * joinMessages.length)](
+    member.user.username
+  );
+
+  const embed = new EmbedBuilder()
+    .setDescription(msg)
+    .setColor(randomColor());
+
+  member.guild.channels.cache.get(JOIN_CHANNEL_ID)?.send({ embeds: [embed] });
+});
+
+client.on(Events.GuildMemberUpdate, (oldM, newM) => {
+  if (!oldM.premiumSince && newM.premiumSince) {
+    const msg = boostMessages[Math.floor(Math.random() * boostMessages.length)](
+      newM.user.username
+    );
+
+    const embed = new EmbedBuilder()
+      .setDescription(msg)
+      .setColor(randomColor());
+
+    newM.guild.channels.cache.get(BOOST_CHANNEL_ID)?.send({ embeds: [embed] });
   }
 });
 
@@ -165,8 +240,6 @@ client.on(Events.InteractionCreate, async interaction => {
    SLASH COMMAND LOADER
 ===================== */
 (async () => {
-  console.log('[SLASH] Loading slash commands…');
-
   const commands = [];
   const dir = path.join(__dirname, 'commands');
 
@@ -182,8 +255,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-
-  console.log('[SLASH] Registered', commands.length, 'commands');
 })();
 
 /* =====================
