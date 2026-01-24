@@ -16,7 +16,8 @@ const {
   ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  PermissionsBitField
 } = require('discord.js');
 
 const fs = require('fs');
@@ -100,7 +101,6 @@ const verificationMap = new Map();
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
 
-  /* DM verification */
   if (!message.guild && verificationMap.has(message.author.id)) {
     const expected = verificationMap.get(message.author.id);
 
@@ -128,7 +128,6 @@ client.on(Events.MessageCreate, async message => {
   const args = message.content.slice(1).trim().split(/ +/);
   const cmd = args.shift()?.toLowerCase();
 
-  /* VERIFY PANEL */
   if (cmd === 'panel' && args[0] === 'verify' && message.author.id === ALLOWED_USER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('✅ Verification')
@@ -145,7 +144,6 @@ client.on(Events.MessageCreate, async message => {
     return message.channel.send({ embeds: [embed], components: [row] });
   }
 
-  /* BUG PANEL */
   if (cmd === 'panel' && args[0] === 'bug' && message.author.id === ALLOWED_USER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('🐞 Bug Reports')
@@ -162,7 +160,6 @@ client.on(Events.MessageCreate, async message => {
     return message.channel.send({ embeds: [embed], components: [row] });
   }
 
-  /* SUGGEST PANEL */
   if (cmd === 'panel' && args[0] === 'suggest' && message.author.id === ALLOWED_USER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('💡 Suggestions')
@@ -184,7 +181,6 @@ client.on(Events.MessageCreate, async message => {
    INTERACTIONS
 ===================== */
 client.on(Events.InteractionCreate, async interaction => {
-  /* VERIFY BUTTON */
   if (interaction.isButton() && interaction.customId === 'verify_button') {
     const a = Math.floor(Math.random() * 10) + 1;
     const b = Math.floor(Math.random() * 10) + 1;
@@ -198,7 +194,6 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  /* BUG BUTTONS */
   if (interaction.isButton() && interaction.customId.startsWith('bug_')) {
     const modal = new ModalBuilder()
       .setCustomId(`bug_modal_${interaction.customId}`)
@@ -217,7 +212,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.showModal(modal);
   }
 
-  /* SUGGEST BUTTON */
   if (interaction.isButton() && interaction.customId === 'suggest_button') {
     const modal = new ModalBuilder()
       .setCustomId('suggest_modal')
@@ -236,22 +230,36 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.showModal(modal);
   }
 
-  /* MODAL SUBMITS */
   if (interaction.isModalSubmit()) {
     const guild = interaction.guild;
     const category = guild.channels.cache.get(TICKET_CATEGORY_ID);
-
     const ticketNum = Math.floor(Math.random() * 9999);
 
-    if (interaction.customId.startsWith('bug_modal_')) {
+    const channel = await guild.channels.create({
+      name: interaction.customId.startsWith('bug_')
+        ? `bug-${ticketNum}`
+        : `suggest-${ticketNum}`,
+      parent: category,
+      permissionOverwrites: [
+        {
+          id: guild.id,
+          deny: [PermissionsBitField.Flags.ViewChannel]
+        },
+        {
+          id: interaction.user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory
+          ]
+        }
+      ]
+    });
+
+    if (interaction.customId.startsWith('bug_')) {
       const desc = interaction.fields.getTextInputValue('bug_desc');
 
-      const channel = await guild.channels.create({
-        name: `bug-${ticketNum}`,
-        parent: category
-      });
-
-      channel.send({
+      await channel.send({
         embeds: [
           new EmbedBuilder()
             .setTitle('🐞 Bug Report')
@@ -260,19 +268,12 @@ client.on(Events.InteractionCreate, async interaction => {
             .setColor(randomColor())
         ]
       });
-
-      return interaction.reply({ content: '✅ Bug ticket created!', ephemeral: true });
     }
 
     if (interaction.customId === 'suggest_modal') {
       const text = interaction.fields.getTextInputValue('suggest_text');
 
-      const channel = await guild.channels.create({
-        name: `suggest-${ticketNum}`,
-        parent: category
-      });
-
-      channel.send({
+      await channel.send({
         embeds: [
           new EmbedBuilder()
             .setTitle('💡 Suggestion')
@@ -281,9 +282,25 @@ client.on(Events.InteractionCreate, async interaction => {
             .setColor(randomColor())
         ]
       });
-
-      return interaction.reply({ content: '✅ Suggestion submitted!', ephemeral: true });
     }
+
+    const confirmEmbed = new EmbedBuilder()
+      .setTitle('✅ Ticket Created')
+      .setDescription('Your ticket has been created successfully.')
+      .setColor(randomColor());
+
+    const linkRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel('Open Ticket')
+        .setStyle(ButtonStyle.Link)
+        .setURL(`https://discord.com/channels/${guild.id}/${channel.id}`)
+    );
+
+    return interaction.reply({
+      embeds: [confirmEmbed],
+      components: [linkRow],
+      ephemeral: true
+    });
   }
 });
 
