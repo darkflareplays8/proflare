@@ -338,7 +338,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const everyone = guild.roles.everyone;
     const channel = await guild.channels.create({
       name: channelName,
-      type: 0, // GUILD_TEXT
+      type: 0,
       parent: SUGGEST_CATEGORY_ID,
       permissionOverwrites: [
         { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] },
@@ -369,7 +369,7 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 /* =====================
-   SLASH COMMAND LOADER
+   SLASH COMMAND LOADER (FIXED TO SUPPORT ARRAYS)
 ===================== */
 (async () => {
   console.log('[SLASH] Loading slash commands…');
@@ -378,11 +378,20 @@ client.on(Events.InteractionCreate, async interaction => {
   const dir = path.join(__dirname, 'commands');
 
   if (fs.existsSync(dir)) {
-    for (const file of fs.readdirSync(dir)) {
-      const cmd = require(path.join(dir, file));
-      if (cmd?.data && cmd?.execute) {
-        commands.push(cmd.data.toJSON());
-        client.commands.set(cmd.data.name, cmd);
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
+    for (const file of files) {
+      const loaded = require(path.join(dir, file));
+      // Handle arrays
+      if (Array.isArray(loaded)) {
+        loaded.forEach(cmd => {
+          if (cmd?.data && cmd?.execute) {
+            client.commands.set(cmd.data.name, cmd);
+            commands.push(cmd.data.toJSON());
+          }
+        });
+      } else if (loaded?.data && loaded?.execute) {
+        client.commands.set(loaded.data.name, loaded);
+        commands.push(loaded.data.toJSON());
       }
     }
   }
