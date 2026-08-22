@@ -1,4 +1,4 @@
-require('dotenv').config(); // MUST be first
+require('dotenv').config(); // MUST be fah
 
 console.log('[BOOT] Starting ProFlare bot…');
 
