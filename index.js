@@ -67,6 +67,11 @@ const BOOST_MESSAGES = [
   member => `🔥 **${member.user.username}** is supporting us!`
 ];
 
+const EMOJI_POOL = [
+  '🍎', '🍌', '🍇', '🍉', '🍓', '🍒', '🍑', '🍍',
+  '🥝', '🥥', '🍋', '🍊', '🥑', '🍆', '🥕', '🌽'
+];
+
 /* =====================
    CLIENT
 ===================== */
@@ -89,6 +94,42 @@ client.commands = new Collection();
 const randomColor = () => Math.floor(Math.random() * 0xffffff);
 
 const verificationMap = new Map();
+const pendingVerifyClicks = new Set();
+const verifyTimeouts = new Map();
+
+const VERIFY_TIMEOUT_MS = 5 * 60 * 1000;
+
+function clearVerifyState(userId) {
+  verificationMap.delete(userId);
+  pendingVerifyClicks.delete(userId);
+  const timeout = verifyTimeouts.get(userId);
+  if (timeout) {
+    clearTimeout(timeout);
+    verifyTimeouts.delete(userId);
+  }
+}
+
+function startVerifyTimeout(userId) {
+  const timeout = setTimeout(() => {
+    console.log('[VERIFY] Challenge expired for', userId);
+    clearVerifyState(userId);
+  }, VERIFY_TIMEOUT_MS);
+  verifyTimeouts.set(userId, timeout);
+}
+
+function buildChallenge() {
+  const common = EMOJI_POOL[Math.floor(Math.random() * EMOJI_POOL.length)];
+  let odd = EMOJI_POOL[Math.floor(Math.random() * EMOJI_POOL.length)];
+  while (odd === common) {
+    odd = EMOJI_POOL[Math.floor(Math.random() * EMOJI_POOL.length)];
+  }
+
+  const gridSize = 5;
+  const oddIndex = Math.floor(Math.random() * gridSize);
+  const grid = Array.from({ length: gridSize }, (_, i) => (i === oddIndex ? odd : common));
+
+  return { grid, oddIndex };
+}
 
 function createEmbed(title, member) {
   return new EmbedBuilder()
@@ -104,30 +145,6 @@ function createEmbed(title, member) {
 ===================== */
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
-
-  // DM verification reply
-  if (!message.guild && verificationMap.has(message.author.id)) {
-    const expected = verificationMap.get(message.author.id);
-    console.log('[VERIFY] DM from', message.author.tag, '->', message.content);
-
-    if (parseInt(message.content) === expected) {
-      verificationMap.delete(message.author.id);
-
-      for (const guild of client.guilds.cache.values()) {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member) continue;
-
-        await member.roles.add(VERIFIED_ROLE_ID).catch(console.error);
-        guild.channels.cache
-          .get(VERIFY_LOG_CHANNEL_ID)
-          ?.send(`✅ ${message.author.tag} verified`);
-      }
-
-      return message.reply('✅ Verification successful!');
-    } else {
-      return message.reply('❌ Wrong answer. Click verify again.');
-    }
-  }
 
   if (!message.content.startsWith(PREFIX)) return;
 
@@ -150,14 +167,23 @@ client.on(Events.MessageCreate, async message => {
     console.log('[CMD] !panel verify used');
 
     const embed = new EmbedBuilder()
-      .setTitle('✅ Verification')
-      .setDescription('Click the button below to verify.')
-      .setColor(randomColor());
+      .setTitle('🔐 Server Verification')
+      .setDescription(
+        'Welcome! To gain access to the rest of the server, please verify that you\'re human.\n\n' +
+        '**How it works:**\n' +
+        '1️⃣ Click the **Verify** button below\n' +
+        '2️⃣ Check your DMs for a quick emoji challenge\n' +
+        '3️⃣ Spot the odd one out and click the matching button\n\n' +
+        '*Make sure your DMs are open for this server.*'
+      )
+      .setColor(0x57F287)
+      .setFooter({ text: 'Verification takes less than 10 seconds' });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('verify_button')
         .setLabel('Verify')
+        .setEmoji('✅')
         .setStyle(ButtonStyle.Success)
     );
 
@@ -250,19 +276,79 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.customId === 'verify_button') {
       console.log('[VERIFY] Button clicked by', interaction.user.tag);
 
-      const a = Math.floor(Math.random() * 10) + 1;
-      const b = Math.floor(Math.random() * 10) + 1;
+      if (pendingVerifyClicks.has(interaction.user.id)) {
+        return interaction.reply({
+          content: '⏳ You already have a verification challenge waiting in your DMs.',
+          ephemeral: true
+        });
+      }
+      pendingVerifyClicks.add(interaction.user.id);
 
-      verificationMap.set(interaction.user.id, a + b);
+      const { grid, oddIndex } = buildChallenge();
+      verificationMap.set(interaction.user.id, oddIndex);
+      startVerifyTimeout(interaction.user.id);
+
+      const challengeEmbed = new EmbedBuilder()
+        .setTitle('🧩 Spot the Odd One Out')
+        .setDescription('One of these emojis is different from the rest. Click the button that matches it.\n\n*This challenge expires in 5 minutes.*')
+        .setColor(0x5865F2);
+
+      const row = new ActionRowBuilder().addComponents(
+        grid.map((emoji, i) =>
+          new ButtonBuilder()
+            .setCustomId(`verify_answer_${i}`)
+            .setEmoji(emoji)
+            .setStyle(ButtonStyle.Secondary)
+        )
+      );
 
       try {
-        await interaction.user.send(
-          `🧮 **Verification Required**\n\nWhat is **${a} + ${b}**? Reply with the number.`
-        );
+        await interaction.user.send({ embeds: [challengeEmbed], components: [row] });
         await interaction.reply({ content: '📬 Check your DMs!', ephemeral: true });
       } catch (err) {
         console.error('[VERIFY] DM failed', err);
+        clearVerifyState(interaction.user.id);
         await interaction.reply({ content: '❌ Your DMs are closed.', ephemeral: true });
+      }
+    }
+
+    // Verify challenge answer
+    if (interaction.customId.startsWith('verify_answer_')) {
+      const chosenIndex = parseInt(interaction.customId.split('_')[2]);
+      const correctIndex = verificationMap.get(interaction.user.id);
+
+      if (correctIndex === undefined) {
+        return interaction.update({
+          content: '⚠️ This challenge has expired. Please click Verify again.',
+          embeds: [],
+          components: []
+        });
+      }
+
+      clearVerifyState(interaction.user.id);
+
+      if (chosenIndex === correctIndex) {
+        for (const guild of client.guilds.cache.values()) {
+          const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+          if (!member) continue;
+
+          await member.roles.add(VERIFIED_ROLE_ID).catch(console.error);
+          guild.channels.cache
+            .get(VERIFY_LOG_CHANNEL_ID)
+            ?.send(`✅ ${interaction.user.tag} verified`);
+        }
+
+        await interaction.update({
+          content: '✅ Verification successful! You now have access to the server.',
+          embeds: [],
+          components: []
+        });
+      } else {
+        await interaction.update({
+          content: '❌ Wrong one. Head back to the server and click Verify to try again.',
+          embeds: [],
+          components: []
+        });
       }
     }
 
